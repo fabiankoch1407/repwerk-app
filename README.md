@@ -1,48 +1,43 @@
 # Repwerk Fitness
 
-Fitness- und Ernährungs-App für iOS und Android, gebaut mit Expo (SDK 57) und React Native.
+Fitness- und Ernährungs-App als installierbare Web-App für iPhone und Android. Keine App-Store-Installation nötig: Link öffnen, auf den Startbildschirm legen, fertig. Funktioniert auch offline.
 
-## App auf dem Handy testen (ohne Installation auf dem Computer)
+## App aufs Handy holen
 
-Einmalig:
+Die App läuft unter der Adresse, die Cloudflare dir nach dem Einrichten zeigt (zum Beispiel `https://repwerk-app.pages.dev`).
 
-1. Lade **Expo Go** aus dem App Store oder von Google Play.
-2. Leg auf [expo.dev](https://expo.dev/signup) ein kostenloses Konto an und melde dich damit in Expo Go an.
+- **iPhone:** Adresse in Safari öffnen → **Teilen** → **Zum Home-Bildschirm**.
+- **Android:** Adresse in Chrome öffnen → **Installieren** (oder Menü ⋮ → **App installieren**).
 
-Jedes Mal:
+Neue Versionen kommen automatisch: Jede Änderung in diesem Repository wird in etwa einer Minute veröffentlicht. Schließe die App und öffne sie neu, dann ist der neue Stand da.
 
-1. Öffne dieses Repository auf GitHub und klicke auf **Code → Codespaces**.
-   - Beim ersten Mal: **Create codespace on main**. Das Einrichten dauert ein paar Minuten.
-   - Danach: deinen vorhandenen Codespace in der Liste öffnen.
-2. Unten im Fenster (Terminal) beim ersten Mal einmalig anmelden:
-   ```
-   npx expo login
-   ```
-3. Hol den neuesten Stand und starte die App:
-   ```
-   git pull
-   npm run tunnel
-   ```
-4. Scanne den QR-Code:
-   - **iPhone:** mit der Kamera-App, dann „In Expo Go öffnen“.
-   - **Android:** in Expo Go auf **Scan QR code**.
+## Einmalig einrichten (Cloudflare Pages, kostenlos)
 
-Zum Beenden im Terminal **Strg + C** drücken. Einen Codespace, den du nicht nutzt, hält GitHub nach 30 Minuten automatisch an.
+1. Konto anlegen auf [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up).
+2. **Workers & Pages → Create → Pages → Import an existing Git repository**.
+3. GitHub verbinden und `repwerk-app` auswählen.
+4. Einstellungen: Production branch `main`, Framework preset **None**, Build command **leer lassen**, Build output directory `/`.
+5. **Save and Deploy**. Nach etwa einer Minute erscheint deine Adresse.
+
+## KI einschalten (Foto-Scan, Coach, Ernährungsplan)
+
+Die KI läuft über eine kleine Server-Funktion bei Cloudflare (`functions/api/ai.js`). Der Schlüssel bleibt auf dem Server und kommt nie aufs Handy.
+
+1. Konto in der [Anthropic Console](https://console.anthropic.com) anlegen, Guthaben aufladen und ein **monatliches Ausgabelimit** setzen.
+2. Einen API-Schlüssel erstellen.
+3. In Cloudflare: dein Projekt → **Settings → Variables and Secrets → Add** → Typ **Secret**, Name `ANTHROPIC_API_KEY`, Wert = dein Schlüssel.
+4. **Deployments → Retry deployment** beim neuesten Eintrag, damit der Schlüssel aktiv wird.
+
+Solange kein Schlüssel eingetragen ist, zeigt die App bei den KI-Funktionen einen Hinweis und alles andere funktioniert normal.
 
 ## Projektaufbau
 
-| Ordner | Inhalt |
+| Datei / Ordner | Inhalt |
 | --- | --- |
-| `src/app` | Bildschirme (Expo Router): Tabs, Fragebogen, Essen eintragen, Einstellungen |
-| `src/components` | Bausteine wie Karte, Button, Kalorienring, Icons |
-| `src/lib` | Speicher, Berechnung von Kalorien und Trainingsplan, Formatierung |
-| `src/data` | Lebensmittel und Übungen |
-| `src/theme` | Farben, Schriftgrößen, Abstände (Repwerk Design System) |
+| `index.html` | Die fertige App (wird aus `src/` gebaut) |
+| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch) |
+| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` |
+| `manifest.webmanifest`, `sw.js`, `icons/` | Installierbarkeit und Offline-Betrieb |
+| `build.py` | Baut `index.html` und `sw.js` aus `src/` (`python3 build.py`) |
 
-## Stand
-
-- [x] Phase 2a: Grundgerüst, Design, Navigation, Fragebogen, Essen eintragen, Wasser (Speicherung auf dem Handy)
-- [ ] Phase 2b: Training mit Sätzen, Pausen-Timer und Übungs-Animationen
-- [ ] Phase 3: Login und Speicherung in Supabase
-- [ ] Phase 4: Foto-Scan und AI Coach
-- [ ] Danach: Community, Pro-Abo, Werbung, Widgets, Veröffentlichung
+Der frühere Expo-Stand liegt im Zweig `expo-app`.
