@@ -813,6 +813,18 @@ Object.assign(EN, {
   'Suche in Open Food Facts …': 'Searching Open Food Facts …', 'Markenprodukte': 'Branded products', 'Nichts in der Grundliste gefunden.': 'Nothing found in the basic list.', 'Die Online-Suche ist gerade nicht erreichbar.': 'Online search isn’t available right now.', 'Tippe auf die Menge, um deine Portion einzustellen.': 'Tap the amount to set your serving.'
 });
 RULES.push([new RegExp('^([\\d.,]+) g KH( ·)?$'), '$1 g carbs$2'], [new RegExp('^(· )?pro 100 (g|ml): (.+)$'), (m, a, u, rest) => `${a || ''}per 100 ${u}: ${rest}`], [new RegExp('^Keine Markenprodukte zu „(.+)“ gefunden\\.$'), 'No branded products found for “$1”.'], [new RegExp('^„(.+)“ in Markenprodukten suchen$'), 'Search branded products for “$1”']);
+/* Community on Supabase (v8) */
+Object.assign(EN, {
+  'Melde dich an, um Workouts zu teilen.': 'Sign in to share workouts.', 'Melde dich an für die Community': 'Sign in for the community',
+  'Mit einem Konto teilst du Workouts, folgst Freunden und siehst ihre Trainings im Feed.': 'With an account you share workouts, follow friends and see their training in your feed.',
+  'Die Community braucht Login und Cloud-Speicher. Die sind auf diesem Server noch nicht eingerichtet.': 'The community needs login and cloud backup, which aren’t set up on this server yet.',
+  'Anmelden oder Konto erstellen': 'Sign in or create account', 'Name suchen': 'Search name', 'Personen nach Namen suchen': 'Search people by name', 'Einladen': 'Invite',
+  'Zuletzt aktive Mitglieder. Lade Freunde mit deinem Link ein: Wer ihn öffnet, landet direkt auf deinem Profil.': 'Recently active members. Invite friends with your link: whoever opens it lands right on your profile.',
+  'Lade Freunde mit deinem Link ein: Wer ihn öffnet, landet direkt auf deinem Profil.': 'Invite friends with your link: whoever opens it lands right on your profile.',
+  'Niemand mit diesem Namen gefunden.': 'Nobody found with that name.', 'Noch niemand außer dir. Lade Freunde mit deinem Link ein.': 'Nobody here but you yet. Invite friends with your link.',
+  'Leg zuerst dein Profil an, damit Freunde dich erkennen': 'Set up your profile first so friends recognise you', '1 Workout': '1 workout'
+});
+RULES.push([new RegExp('^\\+(\\d+) weitere$'), '+$1 more']);
 
 /* ---------- Smart coach (USP): training-aware targets, weekly check-in, load suggestions ----------
    Strings in this file are written in both languages via L(de, en), so the DOM translator has nothing to do here. */
@@ -1109,6 +1121,7 @@ const summaryOf = d => {
 /* first: true right after logging in on this device */
 async function cloudSync(first) {
   if (!loggedIn() || cloud.busy) return;
+  if (first) setTimeout(handleInviteParam, 1200);
   cloud.state = 'syncing'; paintCloud();
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
   const meta = lsGet(SYNC_KEY), known = meta && meta.uid === AUTH.user.id, localHas = !!(S && S.profile), remoteHas = !!(remote && remote.profile);
@@ -1232,6 +1245,69 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('visibilitychange', () => { if (!loggedIn()) return; if (document.visibilityState === 'hidden') { if (cloud.dirty) { clearTimeout(cloud.timer); cloudPush(); } } else cloudSync(false); });
 window.addEventListener('online', () => { if (loggedIn() && cloud.dirty) cloudPush(); });
+
+/* ---------- Community backend ----------
+   CB is the community store. Inside Claude it wraps window.claude's db (claudeCB); in the web app it talks to
+   Supabase tables public.profiles and public.posts (supaCB). The community views in app.js only use CB. */
+let CB = null;
+function claudeCB(db, me) {
+  return {
+    kind: 'claude',
+    setProfile: p => db.doc(`profiles/${me}`).set(p),
+    profiles: async () => { const q = await db.collection('profiles').limit(200).get(); return Object.fromEntries(q.docs.map(d => [d.id, d.data()])); },
+    profilesByIds: async ids => { const all = await CB.profiles(); return Object.fromEntries(ids.filter(id => all[id]).map(id => [id, all[id]])); },
+    setPost: post => db.doc(`posts/${me}/list/${post.id}`).set(post),
+    updatePost: (id, f) => db.doc(`posts/${me}/list/${id}`).update(f),
+    deletePost: id => db.doc(`posts/${me}/list/${id}`).delete(),
+    listPosts: async (ids, limit) => (await Promise.all(ids.map(id => db.collection(`posts/${id}/list`).orderBy('at', 'desc').limit(limit).get().then(q => q.docs.map(d => d.data())).catch(() => [])))).flat().sort((a, b) => b.at - a.at).slice(0, limit * 4),
+    getPost: async (author, id) => { const s = await db.doc(`posts/${author}/list/${id}`).get(); return s.exists ? s.data() : null; },
+    deleteAll: async () => { const q = await db.collection(`posts/${me}/list`).get(); await Promise.all(q.docs.map(x => db.doc(`posts/${me}/list/${x.id}`).delete())); await db.doc(`profiles/${me}`).delete(); }
+  };
+}
+const PROF_COLS = 'id,name,bio,avatar,goal,at';
+const profMap = rows => Object.fromEntries((rows || []).map(r => [r.id, { name: r.name, bio: r.bio, avatar: r.avatar, goal: r.goal, at: r.at }]));
+const uuidOk = id => /^[0-9a-f-]{36}$/i.test(id);
+function supaCB() {
+  const me = () => AUTH.user.id, J = b => JSON.stringify(b);
+  return {
+    kind: 'supabase',
+    setProfile: p => sbFetch('/rest/v1/profiles?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: J({ id: me(), name: p.name || '', bio: p.bio || '', avatar: p.avatar || '', goal: p.goal || '', at: p.at || Date.now() }) }),
+    profiles: async q => profMap(await sbFetch(`/rest/v1/profiles?select=${PROF_COLS}&order=at.desc&limit=100${q ? '&name=ilike.' + encodeURIComponent('*' + q.replace(/[*,()]/g, '') + '*') : ''}`, { method: 'GET' })),
+    profilesByIds: async ids => { ids = ids.filter(uuidOk); return ids.length ? profMap(await sbFetch(`/rest/v1/profiles?select=${PROF_COLS}&id=in.(${ids.join(',')})`, { method: 'GET' })) : {}; },
+    setPost: post => sbFetch('/rest/v1/posts?on_conflict=author,id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: J({ author: me(), id: post.id, at: post.at, data: Object.assign({}, post, { author: me() }) }) }),
+    updatePost: async (id, f) => { const p = await CB.getPost(me(), id); if (p) await CB.setPost(Object.assign(p, f)); },
+    deletePost: id => sbFetch(`/rest/v1/posts?author=eq.${me()}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    listPosts: async (ids, limit) => { ids = ids.filter(uuidOk); if (!ids.length) return []; const rows = await sbFetch(`/rest/v1/posts?select=data&author=in.(${ids.join(',')})&order=at.desc&limit=${limit * 4}`, { method: 'GET' }); return rows.map(r => r.data); },
+    getPost: async (author, id) => { if (!uuidOk(author)) return null; const rows = await sbFetch(`/rest/v1/posts?select=data&author=eq.${author}&id=eq.${encodeURIComponent(id)}`, { method: 'GET' }); return rows[0] ? rows[0].data : null; },
+    deleteAll: async () => { await sbFetch(`/rest/v1/posts?author=eq.${me()}`, { method: 'DELETE' }); await sbFetch(`/rest/v1/profiles?id=eq.${me()}`, { method: 'DELETE' }); }
+  };
+}
+/* Turn the Supabase community on or off depending on login state */
+function syncCommunity() {
+  if (IN_CLAUDE) return;
+  const on = loggedIn();
+  if (on && (!CB || CB.kind !== 'supabase' || UID !== AUTH.user.id)) { CB = supaCB(); UID = AUTH.user.id; feed = null; people = null; feedState = 'idle'; if (S.social && S.social.name) setTimeout(() => publishProfile().catch(() => {}), 0); }
+  if (!on && CB) { CB = null; UID = null; feed = null; people = null; feedState = 'idle'; }
+}
+/* Invite link: ?freund=<user id> opens that person's profile */
+function inviteLink() { return `${location.origin}${location.pathname}?freund=${UID}`; }
+async function shareInvite() {
+  const url = inviteLink(), text = L('Trainier mit mir in Repwerk Fitness. Folge mir hier:', 'Train with me in Repwerk Fitness. Follow me here:');
+  try { if (navigator.share) { await navigator.share({ title: 'Repwerk Fitness', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast(L('Link kopiert', 'Link copied')); } catch (e) { openSheet(`<h2 class="disp">${L('Einladungslink', 'Invite link')}</h2><input class="input" readonly value="${esc(url)}" onfocus="this.select()"><button class="btn btn-s btn-block" data-close-sheet>${L('Fertig', 'Done')}</button>`); }
+}
+let pendingFriend = (() => { try { return new URLSearchParams(location.search).get('freund'); } catch (e) { return null; } })();
+function handleInviteParam() {
+  const id = pendingFriend; if (!id || !S || !S.profile) return;
+  if (!CB) { if (cloudOn() && !loggedIn()) { view = 'community'; render(); toast(L('Melde dich an, um deinem Freund zu folgen', 'Sign in to follow your friend')); } return; }
+  pendingFriend = null; try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (id !== UID) { view = 'community'; render(); personSheet(id); }
+}
+document.addEventListener('input', e => {
+  if (e.target.id !== 'pq') return;
+  clearTimeout(peopleTimer); const v = e.target.value.trim();
+  peopleTimer = setTimeout(async () => { peopleQ = v; await loadPeople(); render(); const i = document.getElementById('pq'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (er) {} } }, 350);
+});
 
 /* ---------- Barcode scanner + Open Food Facts ----------
    Engines, best first: native BarcodeDetector (Android Chrome) → ZXing WASM ponyfill from jsDelivr (iOS, desktop) →
@@ -1560,7 +1636,7 @@ function makeApiSample() {
   return fn;
 }
 async function connectApi() {
-  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) setSB(j.supabase); render(); if (loggedIn()) cloudSync(false); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
+  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) setSB(j.supabase); render(); if (loggedIn()) cloudSync(false); handleInviteParam(); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
 }
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S && S.profile && view === 'home') render(); });
@@ -1591,13 +1667,13 @@ function migrate(o) {
 }
 function loadLocal() { try { const raw = localStorage.getItem(LS_KEY) || localStorage.getItem('repwerk-proto-v1'); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
 function save() { S.at = Date.now(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 900); if (!IN_CLAUDE) cloudSchedule(); }
-async function flush() { if (!DB || !UID || !dirty) return; dirty = false; try { await DB.doc(`data/users/${UID}/state`).set({ json: JSON.stringify(S), at: S.at }); } catch (e) { dirty = true; } }
+async function flush() { if (!IN_CLAUDE || !DB || !UID || !dirty) return; dirty = false; try { await DB.doc(`data/users/${UID}/state`).set({ json: JSON.stringify(S), at: S.at }); } catch (e) { dirty = true; } }
 async function connectDb() {
   try {
     const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
     if (!db || !user) return;
     const id = await user.id(); if (!id) return;
-    DB = db; UID = id;
+    DB = db; UID = id; CB = claudeCB(db, id);
     const snap = await Promise.race([DB.doc(`data/users/${UID}/state`).get(), new Promise(r => setTimeout(() => r(null), 10000))]);
     const remote = snap && snap.exists ? snap.data() : null;
     if (remote && remote.json && (remote.at || 0) > (S.at || 0)) { S = migrate(JSON.parse(remote.json)); try { localStorage.setItem(LS_KEY, remote.json); } catch (e) {} applyDesign(); }
@@ -1739,7 +1815,7 @@ const doneCount = w => w.exercises.reduce((n, e) => n + e.sets.filter(s => s.don
 const TYPES = { n: 'Normal', w: 'Aufwärmen', d: 'Dropsatz', f: 'Bis zum Versagen' };
 
 /* ---------- UI helpers ---------- */
-let view = 'home', timer = null, R = null, communityTab = 'feed', feed = null, people = null, feedState = 'idle';
+let view = 'home', timer = null, R = null, communityTab = 'feed', feed = null, people = null, feedState = 'idle', peopleQ = '', peopleTimer = null;
 const $ = s => document.querySelector(s);
 function toast(msg) { document.querySelectorAll('.toast').forEach(t => t.remove()); const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2400); }
 function openSheet(html, onMount) {
@@ -1878,6 +1954,7 @@ const swatches = () => `<div class="swatches">${Object.entries(ACCENTS).map(([k,
 /* ---------- Screens ---------- */
 function render() {
   if (!S) return;
+  syncCommunity();
   if (!S.profile) { renderOnboarding(); return; }
   const fn = { nutrition: vNutrition, mealplan: vMealPlan, calendar: vCalendar, stats: vStats, home: vHome, food: vFood, train: vTrain, community: vCommunity, profile: vProfile, settings: vSettings, workout: vWorkout, library: vLibrary, routine: vRoutine }[view] || vHome;
   $('#app').innerHTML = `<div class="screen">${fn()}</div>`;
@@ -2168,7 +2245,7 @@ function finishWorkout() {
   const a = S.active, done = doneCount(a);
   if (!done) { confirmBox('Noch keine Sätze erledigt', 'Hake mindestens einen Satz ab oder verwirf das Training.', 'Okay'); return; }
   const fresh = !a.routineId;
-  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', photo: '', share: !!DB, asRoutine: fresh };
+  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', photo: '', share: !!CB, asRoutine: fresh };
   const draw = sh => {
     sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">Training speichern</h2><button class="iconbtn" data-close-sheet aria-label="Zurück zum Training">${ic('x')}</button></div>
       <input class="input" id="f-name" value="${esc(d.name)}" aria-label="Titel" style="font-weight:700">
@@ -2178,7 +2255,7 @@ function finishWorkout() {
         <span class="cap">In der App schlagen wir Studios in deiner Nähe über den Standort vor, nur wenn du es erlaubst. Im Prototyp merken wir uns deine Gyms.</span></label>
       <label class="field"><span class="lbl">Notiz</span><textarea class="input" id="f-note" placeholder="Wie lief es? Neue Technik, Schmerzen, Stimmung …">${esc(d.note)}</textarea></label>
       <div class="field"><span class="lbl">Foto</span>${d.photo ? `<img class="photo" src="${d.photo}" alt="Dein Trainingsfoto"><button class="btn btn-g" data-nophoto>Foto entfernen</button>` : `<label class="btn btn-s btn-block">${ic('img', 20)} Foto hinzufügen<input type="file" accept="image/*" class="hidden" data-fphoto></label>`}</div>
-      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${DB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Foto.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Teilen kommt mit dem Login.')}</div></div><button class="toggle ${d.share && DB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && DB)}" ${DB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
+      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${CB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Foto.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Melde dich an, um Workouts zu teilen.')}</div></div><button class="toggle ${d.share && CB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && CB)}" ${CB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
       ${fresh ? `<div class="sel"><div class="grow"><div style="font-weight:600">Als Routine speichern</div><div class="cap">Übungen und Sätze als Vorlage für das nächste Mal.</div></div><button class="toggle ${d.asRoutine ? 'on' : ''}" data-ftog="asRoutine" role="switch" aria-checked="${d.asRoutine}" aria-label="Als Routine speichern"></button></div>` : ''}
       <button class="btn btn-p btn-block" data-fsave>Speichern</button>`;
   };
@@ -2200,7 +2277,7 @@ function finishWorkout() {
       if (d.asRoutine && fresh) S.routines.push({ id: uid(), name: d.name, exercises: a.exercises.map(x => ({ exId: x.exId, rest: x.rest, note: x.note, sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) });
       if (a.routineId && a.routineId.startsWith('plan-')) S.planIndex++;
       let posted = false;
-      if (d.share && DB) { try { await postWorkout(a, d.photo); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
+      if (d.share && CB) { try { await postWorkout(a, d.photo); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
       S.workouts.push(a); S.active = null; stopRest(); save(); closeSheet(); view = 'train'; render(); feed = null;
       summarySheet(a, posted, streakBefore);
     });
@@ -2218,7 +2295,7 @@ function editTimeSheet(w) {
       if (!(m >= 1 && m <= 600)) { sh.querySelector('#et-err').textContent = 'Bitte eine Dauer zwischen 1 und 600 Minuten eingeben.'; return; }
       if (isNaN(s) || s.getTime() > Date.now()) { sh.querySelector('#et-err').textContent = 'Bitte einen Beginn in der Vergangenheit wählen.'; return; }
       w.start = s.getTime(); w.dur = m * 60000; w.end = w.start + w.dur; save(); closeSheet(); render(); toast('Dauer gespeichert');
-      if (w.posted && DB) { try { await DB.doc(`posts/${UID}/list/${w.id}`).update({ start: w.start, end: w.end, dur: w.dur }); } catch (e) {} }
+      if (w.posted && CB) { try { await CB.updatePost(w.id, { start: w.start, end: w.end, dur: w.dur }); } catch (e) {} }
     }));
 }
 function summarySheet(a, posted, streakBefore) {
@@ -2251,35 +2328,35 @@ function workoutDetail(id) {
     if (b.dataset.wd === 'time') { closeSheet(); editTimeSheet(w); return; }
     if (b.dataset.wd === 'sum') { closeSheet(); summarySheet(w, w.posted, weekStreak()); return; }
     if (b.dataset.wd === 'routine') { S.routines.push({ id: uid(), name: w.name, exercises: w.exercises.map(x => ({ exId: x.exId, rest: x.rest ?? 90, note: x.note || '', sets: x.sets.map(s => ({ type: s.type || 'n', kg: s.kg, reps: s.reps })) })) }); save(); closeSheet(); render(); toast('Als Routine gespeichert'); }
-    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); if (w.posted && DB) { try { await DB.doc(`posts/${UID}/list/${w.id}`).delete(); } catch (e) {} } save(); closeSheet(); render(); }
+    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); if (w.posted && CB) { try { await CB.deletePost(w.id); } catch (e) {} } save(); closeSheet(); render(); }
   }));
 }
 
 /* ---------- Community ---------- */
-async function publishProfile() { if (!DB || !UID) return; await DB.doc(`profiles/${UID}`).set({ name: S.social.name || 'Ohne Namen', bio: S.social.bio || '', avatar: S.social.avatar || '', goal: S.profile ? GOALS[S.profile.goal] : '', at: Date.now() }); }
+async function publishProfile() { if (!CB || !UID) return; await CB.setProfile({ name: S.social.name || 'Ohne Namen', bio: S.social.bio || '', avatar: S.social.avatar || '', goal: S.profile ? GOALS[S.profile.goal] : '', at: Date.now() }); }
 async function postWorkout(a, photo) {
   if (!S.social.name) S.social.name = S.profile.name || 'Ohne Namen';
   await publishProfile();
   const post = { id: a.id, author: UID, name: a.name, gym: a.gym || '', note: a.note || '', photo: photo || '', start: a.start, end: a.end, dur: wDur(a), at: Date.now(), volume: r0(volume(a)), sets: doneCount(a), prs: a.prs || [],
     exercises: a.exercises.map(x => ({ exId: x.exId, name: exOf(x.exId).name, note: x.note || '', sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) };
   const json = JSON.stringify(post); if (json.length > 240000) post.photo = '';
-  await DB.doc(`posts/${UID}/list/${a.id}`).set(post);
+  await CB.setPost(post);
 }
 async function loadFeed() {
-  if (!DB || feedState === 'loading') return;
+  if (!CB || feedState === 'loading') return;
   feedState = 'loading'; render();
   try {
     const ids = [UID, ...S.following];
-    const parts = await Promise.all(ids.map(id => DB.collection(`posts/${id}/list`).orderBy('at', 'desc').limit(10).get().then(q => q.docs.map(d => d.data())).catch(() => [])));
-    const profs = await loadPeople();
-    feed = parts.flat().filter(Boolean).sort((a, b) => b.at - a.at).slice(0, 40).map(p => Object.assign({}, p, { who: profs[p.author] || {} }));
+    const parts = await CB.listPosts(ids, 10);
+    const profs = await CB.profilesByIds(ids); people = Object.assign(people || {}, profs);
+    feed = parts.filter(Boolean).sort((a, b) => b.at - a.at).slice(0, 40).map(p => Object.assign({}, p, { who: profs[p.author] || {} }));
     feedState = 'ok';
   } catch (e) { feedState = 'error'; }
   render();
 }
 async function loadPeople() {
-  if (!DB) return {};
-  try { const q = await DB.collection('profiles').limit(200).get(); people = Object.fromEntries(q.docs.map(d => [d.id, d.data()])); } catch (e) { people = people || {}; }
+  if (!CB) return {};
+  try { people = await CB.profiles(peopleQ); } catch (e) { people = people || {}; }
   return people;
 }
 function postCard(p) {
@@ -2295,32 +2372,33 @@ function postCard(p) {
 }
 function vCommunity() {
   const head = header('Community', 'Workouts von dir und deinen Freunden');
-  if (!DB) return `${head}<div class="card"><div class="lbl">${IN_CLAUDE ? 'Community nicht verbunden' : 'Community kommt mit dem Login'}</div><p class="muted" style="margin:6px 0 0">${IN_CLAUDE ? 'Freunde, Feed und geteilte Workouts funktionieren, wenn du den Prototyp in Claude öffnest und angemeldet bist. Freunde brauchen Zugriff auf den Prototyp-Link mit der Rolle „Mitwirkende“.' : 'Freunde, Feed und geteilte Workouts brauchen ein Konto. Das bauen wir als Nächstes, zusammen mit dem Speichern auf mehreren Geräten.'}</p></div>${adBanner()}`;
+  if (!CB) return `${head}<div class="card" style="display:flex;flex-direction:column;gap:10px"><div class="lbl">${IN_CLAUDE ? 'Community nicht verbunden' : 'Melde dich an für die Community'}</div><p class="muted" style="margin:0">${IN_CLAUDE ? 'Freunde, Feed und geteilte Workouts funktionieren, wenn du den Prototyp in Claude öffnest und angemeldet bist. Freunde brauchen Zugriff auf den Prototyp-Link mit der Rolle „Mitwirkende“.' : cloudOn() ? 'Mit einem Konto teilst du Workouts, folgst Freunden und siehst ihre Trainings im Feed.' : 'Die Community braucht Login und Cloud-Speicher. Die sind auf diesem Server noch nicht eingerichtet.'}</p>${!IN_CLAUDE && cloudOn() ? '<button class="btn btn-p" data-cl="login">Anmelden oder Konto erstellen</button>' : ''}</div>${adBanner()}`;
   if (!S.social.name) return `${head}<div class="card" style="display:flex;flex-direction:column;gap:10px"><div class="lbl">Leg dein Community-Profil an</div><p class="muted" style="margin:0">Mit Name, Profilbild und Beschreibung finden dich Freunde und sehen deine geteilten Workouts.</p><button class="btn btn-p" data-act="editprofile">Profil anlegen</button></div>`;
   if (communityTab === 'feed' && feed === null && feedState !== 'loading') setTimeout(loadFeed, 0);
   if (communityTab === 'people' && people === null) setTimeout(() => loadPeople().then(render), 0);
   const seg = `<div class="seg"><button class="${communityTab === 'feed' ? 'on' : ''}" data-ctab="feed">Feed</button><button class="${communityTab === 'people' ? 'on' : ''}" data-ctab="people">Freunde finden</button></div>`;
   if (communityTab === 'people') {
     const list = Object.entries(people || {}).filter(([id]) => id !== UID);
-    return `${head}${seg}<p class="cap" style="margin:0">Hier stehen alle, die den Prototyp nutzen und ein Profil angelegt haben. Teile den Link mit Freunden, damit sie hier auftauchen.</p>
-      <div class="card" style="padding-top:4px;padding-bottom:4px">${people === null ? '<div class="empty">Lade …</div>' : list.length ? list.map(([id, p]) => `<div class="sel"><button data-person="${esc(id)}" class="row grow" style="border:0;background:transparent;padding:0;text-align:left">${avatar(p.avatar, p.name)}<div class="grow" style="min-width:0"><div style="font-weight:700">${esc(p.name)}</div><div class="cap" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.bio || p.goal || '')}</div></div></button><button class="btn ${S.following.includes(id) ? 'btn-s' : 'btn-p'} btn-sm" data-follow="${esc(id)}">${S.following.includes(id) ? 'Folge ich' : 'Folgen'}</button></div>`).join('') : '<div class="empty">Noch niemand außer dir. Teile den Prototyp-Link mit Freunden.</div>'}</div>${adBanner()}`;
+    const sb = CB.kind === 'supabase';
+    return `${head}${seg}${sb ? `<div class="row" style="gap:8px"><input class="input grow" id="pq" type="search" value="${esc(peopleQ)}" placeholder="Name suchen" aria-label="Personen nach Namen suchen"><button class="btn btn-p" data-act="invite">${ic('users', 18)} Einladen</button></div><p class="cap" style="margin:0">${peopleQ ? '' : 'Zuletzt aktive Mitglieder. '}Lade Freunde mit deinem Link ein: Wer ihn öffnet, landet direkt auf deinem Profil.</p>` : `<p class="cap" style="margin:0">Hier stehen alle, die den Prototyp nutzen und ein Profil angelegt haben. Teile den Link mit Freunden, damit sie hier auftauchen.</p>`}
+      <div class="card" style="padding-top:4px;padding-bottom:4px">${people === null ? '<div class="empty">Lade …</div>' : list.length ? list.map(([id, p]) => `<div class="sel"><button data-person="${esc(id)}" class="row grow" style="border:0;background:transparent;padding:0;text-align:left">${avatar(p.avatar, p.name)}<div class="grow" style="min-width:0"><div style="font-weight:700">${esc(p.name)}</div><div class="cap" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.bio || p.goal || '')}</div></div></button><button class="btn ${S.following.includes(id) ? 'btn-s' : 'btn-p'} btn-sm" data-follow="${esc(id)}">${S.following.includes(id) ? 'Folge ich' : 'Folgen'}</button></div>`).join('') : (peopleQ ? '<div class="empty">Niemand mit diesem Namen gefunden.</div>' : sb ? '<div class="empty">Noch niemand außer dir. Lade Freunde mit deinem Link ein.</div>' : '<div class="empty">Noch niemand außer dir. Teile den Prototyp-Link mit Freunden.</div>')}</div>${adBanner()}`;
   }
-  return `${head}${seg}<div class="row" style="justify-content:space-between"><span class="cap">${S.following.length === 1 ? '1 Freund' : S.following.length + ' Freunde'} · ${feed ? feed.length : 0} Workouts</span><button class="btn btn-g" data-act="refreshfeed">${ic('refresh', 18)} Aktualisieren</button></div>
+  return `${head}${seg}<div class="row" style="justify-content:space-between"><span class="cap">${(n => n === 1 ? '1 Freund' : n + ' Freunde')(S.following.filter(id => CB.kind !== 'supabase' || uuidOk(id)).length)} · ${(n => n === 1 ? '1 Workout' : n + ' Workouts')(feed ? feed.length : 0)}</span><div class="row" style="gap:6px">${CB.kind === 'supabase' ? `<button class="btn btn-g" data-act="invite">${ic('users', 18)} Einladen</button>` : ''}<button class="iconbtn" data-act="refreshfeed" aria-label="Aktualisieren">${ic('refresh', 20)}</button></div></div>
     ${feedState === 'loading' && !feed ? '<div class="card empty"><div class="spinner" style="margin:0 auto 8px"></div>Lade Feed …</div>' : feedState === 'error' ? '<div class="card empty">Der Feed konnte nicht geladen werden. Tippe auf Aktualisieren.</div>' :
     (feed && feed.length) ? feed.map((p, i) => postCard(p) + (i === 1 ? adBanner() : '')).join('') : `<div class="card empty">Noch keine Workouts. Teile dein nächstes Training beim Speichern oder folge Freunden unter „Freunde finden“.</div>`}`;
 }
 async function personSheet(id) {
-  const p = (people && people[id]) || (await loadPeople())[id] || { name: 'Jemand' };
+  let p = people && people[id]; if (!p && CB) { try { p = (await CB.profilesByIds([id]))[id]; if (p) people = Object.assign(people || {}, { [id]: p }); } catch (e) {} } p = p || { name: 'Jemand' };
   const sh = openSheet(`<div style="display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center">${avatar(p.avatar, p.name, 88)}<h2 class="disp">${esc(p.name)}</h2>${p.bio ? `<p translate="no" class="muted" style="margin:0;white-space:pre-wrap">${esc(p.bio)}</p>` : ''}${p.goal ? `<span class="tag">${esc(p.goal)}</span>` : ''}
     ${id !== UID ? `<button class="btn ${S.following.includes(id) ? 'btn-s' : 'btn-p'}" data-follow="${esc(id)}">${S.following.includes(id) ? 'Folge ich' : 'Folgen'}</button>` : ''}</div>
     <div class="lbl">Geteilte Workouts</div><div id="pp" class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
   sh.addEventListener('click', ev => { const f = ev.target.closest('[data-follow]'); if (f) { toggleFollow(f.dataset.follow); closeSheet(); personSheet(id); } const po = ev.target.closest('[data-post]'); if (po) openPost(po.dataset.post); });
-  try { const q = await DB.collection(`posts/${id}/list`).orderBy('at', 'desc').limit(20).get(); const list = q.docs.map(d => Object.assign(d.data(), { who: p })); const el = sh.querySelector('#pp'); if (el) { el.className = ''; el.style.cssText = 'display:flex;flex-direction:column;gap:12px'; el.innerHTML = list.length ? list.map(postCard).join('') : '<div class="empty">Noch nichts geteilt.</div>'; } } catch (e) { const el = sh.querySelector('#pp'); if (el) el.textContent = 'Konnte nicht geladen werden.'; }
+  try { const list = (await CB.listPosts([id], 20)).map(d => Object.assign(d, { who: p })); const el = sh.querySelector('#pp'); if (el) { el.className = ''; el.style.cssText = 'display:flex;flex-direction:column;gap:12px'; el.innerHTML = list.length ? list.map(postCard).join('') : '<div class="empty">Noch nichts geteilt.</div>'; } } catch (e) { const el = sh.querySelector('#pp'); if (el) el.textContent = 'Konnte nicht geladen werden.'; }
 }
 async function openPost(key) {
   const [author, id] = key.split(':');
   let p = feed && feed.find(x => x.author === author && x.id === id);
-  if (!p) { try { const s = await DB.doc(`posts/${author}/list/${id}`).get(); if (s.exists) p = Object.assign(s.data(), { who: (people || {})[author] || {} }); } catch (e) {} }
+  if (!p) { try { const d = await CB.getPost(author, id); if (d) p = Object.assign(d, { who: (people || {})[author] || {} }); } catch (e) {} }
   if (!p) { toast('Workout nicht gefunden'); return; }
   openSheet(workoutDetailHTML(p, { head: `<div class="row">${avatar(p.who.avatar, p.who.name, 36)}<div class="grow"><b>${esc(p.who.name || 'Jemand')}</b><div class="cap">${ago(p.at)}</div></div><button class="iconbtn" data-close-sheet aria-label="Schließen">${ic('x')}</button></div>` }) + (author !== UID ? `<button class="btn btn-s btn-block" data-copyr>Als Routine übernehmen</button>` : ''), sh => sh.addEventListener('click', ev => {
     if (ev.target.closest('[data-copyr]')) { S.routines.push({ id: uid(), name: p.name + ' (von ' + (p.who.name || 'Freund') + ')', exercises: p.exercises.filter(x => EX[x.exId] || S.customEx.some(c => c.id === x.exId)).map(x => ({ exId: x.exId, rest: 90, note: x.note || '', sets: x.sets.map(s => ({ type: s.type || 'n', kg: s.kg, reps: s.reps })) })) }); save(); closeSheet(); toast('Routine übernommen'); }
@@ -2640,8 +2718,9 @@ async function onClick(e) {
     case 'coach': coach(); break;
     case 'editprofile': editProfileSheet(); break;
     case 'refreshfeed': feed = null; feedState = 'idle'; loadFeed(); break;
+    case 'invite': if (!S.social.name) { editProfileSheet(); toast('Leg zuerst dein Profil an, damit Freunde dich erkennen'); } else { publishProfile().catch(() => {}); shareInvite(); } break;
     case 'reset': if (await confirmBox('Alle Daten löschen?', 'Profil, Mahlzeiten, Trainings, Routinen und Gewicht werden gelöscht. Geteilte Workouts entfernen wir aus der Community.', 'Löschen', true)) {
-      if (DB && UID) { try { const q = await DB.collection(`posts/${UID}/list`).get(); await Promise.all(q.docs.map(x => DB.doc(`posts/${UID}/list/${x.id}`).delete())); await DB.doc(`profiles/${UID}`).delete(); } catch (er) {} }
+      if (CB && UID) { try { await CB.deleteAll(); } catch (er) {} }
       S = blank(); save(); applyDesign(); view = 'home'; render(); } break;
   }
 }

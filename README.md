@@ -35,7 +35,7 @@ Solange kein Schlüssel eingetragen ist, zeigt die App bei den KI-Funktionen ein
 Ohne Konto liegen alle Daten nur auf dem Handy. Mit Supabase melden sich Nutzer per E-Mail-Code an (kein Passwort), und ihre Daten sind auf jedem Gerät da.
 
 1. Auf [supabase.com](https://supabase.com) ein Projekt anlegen. Als Region **Central EU (Frankfurt)** wählen.
-2. **SQL Editor → New query**: den Inhalt von `supabase/setup.sql` einfügen und **Run** klicken. Das legt die Tabelle mit Zugriffsschutz an.
+2. **SQL Editor → New query**: den Inhalt von `supabase/setup.sql` einfügen und **Run** klicken. Das legt die Tabellen für Speicher und Community mit Zugriffsschutz an. Nach Updates der Datei einfach erneut ausführen.
 3. **Authentication → Emails (Email Templates)**: in den Vorlagen **Magic Link** und **Confirm signup** den Link durch den Code ersetzen, zum Beispiel:
    `<h2>Dein Repwerk-Code</h2><p>Gib diesen Code in der App ein: <strong>{{ .Token }}</strong></p>`
 4. **Project Settings → API Keys**: die **Project URL** und den **Publishable key** (`sb_publishable_…`) kopieren. Niemals den Secret key verwenden.
@@ -43,7 +43,7 @@ Ohne Konto liegen alle Daten nur auf dem Handy. Mit Supabase melden sich Nutzer 
 
 Hinweis: Der eingebaute E-Mail-Versand von Supabase schickt nur wenige Mails pro Stunde. Für den Start mit echten Nutzern unter **Authentication → Emails → SMTP Settings** einen eigenen Anbieter eintragen (zum Beispiel Brevo oder Resend).
 
-In der App: **Profil → Einstellungen → Konto** zum Anmelden, Synchronisieren, Exportieren und Konto löschen.
+In der App: **Profil → Einstellungen → Konto** zum Anmelden, Synchronisieren, Exportieren und Konto löschen. Mit Konto funktioniert auch die **Community**: Workouts teilen, Freunde per Name suchen oder per Einladungslink (`?freund=…`) hinzufügen, Feed.
 
 ## Projektaufbau
 

@@ -222,3 +222,15 @@ Object.assign(EN, {
   'Suche in Open Food Facts …': 'Searching Open Food Facts …', 'Markenprodukte': 'Branded products', 'Nichts in der Grundliste gefunden.': 'Nothing found in the basic list.', 'Die Online-Suche ist gerade nicht erreichbar.': 'Online search isn’t available right now.', 'Tippe auf die Menge, um deine Portion einzustellen.': 'Tap the amount to set your serving.'
 });
 RULES.push([new RegExp('^([\\d.,]+) g KH( ·)?$'), '$1 g carbs$2'], [new RegExp('^(· )?pro 100 (g|ml): (.+)$'), (m, a, u, rest) => `${a || ''}per 100 ${u}: ${rest}`], [new RegExp('^Keine Markenprodukte zu „(.+)“ gefunden\\.$'), 'No branded products found for “$1”.'], [new RegExp('^„(.+)“ in Markenprodukten suchen$'), 'Search branded products for “$1”']);
+/* Community on Supabase (v8) */
+Object.assign(EN, {
+  'Melde dich an, um Workouts zu teilen.': 'Sign in to share workouts.', 'Melde dich an für die Community': 'Sign in for the community',
+  'Mit einem Konto teilst du Workouts, folgst Freunden und siehst ihre Trainings im Feed.': 'With an account you share workouts, follow friends and see their training in your feed.',
+  'Die Community braucht Login und Cloud-Speicher. Die sind auf diesem Server noch nicht eingerichtet.': 'The community needs login and cloud backup, which aren’t set up on this server yet.',
+  'Anmelden oder Konto erstellen': 'Sign in or create account', 'Name suchen': 'Search name', 'Personen nach Namen suchen': 'Search people by name', 'Einladen': 'Invite',
+  'Zuletzt aktive Mitglieder. Lade Freunde mit deinem Link ein: Wer ihn öffnet, landet direkt auf deinem Profil.': 'Recently active members. Invite friends with your link: whoever opens it lands right on your profile.',
+  'Lade Freunde mit deinem Link ein: Wer ihn öffnet, landet direkt auf deinem Profil.': 'Invite friends with your link: whoever opens it lands right on your profile.',
+  'Niemand mit diesem Namen gefunden.': 'Nobody found with that name.', 'Noch niemand außer dir. Lade Freunde mit deinem Link ein.': 'Nobody here but you yet. Invite friends with your link.',
+  'Leg zuerst dein Profil an, damit Freunde dich erkennen': 'Set up your profile first so friends recognise you', '1 Workout': '1 workout'
+});
+RULES.push([new RegExp('^\\+(\\d+) weitere$'), '+$1 more']);

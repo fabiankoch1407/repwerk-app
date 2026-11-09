@@ -60,6 +60,7 @@ const summaryOf = d => {
 /* first: true right after logging in on this device */
 async function cloudSync(first) {
   if (!loggedIn() || cloud.busy) return;
+  if (first) setTimeout(handleInviteParam, 1200);
   cloud.state = 'syncing'; paintCloud();
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
   const meta = lsGet(SYNC_KEY), known = meta && meta.uid === AUTH.user.id, localHas = !!(S && S.profile), remoteHas = !!(remote && remote.profile);
@@ -183,3 +184,66 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('visibilitychange', () => { if (!loggedIn()) return; if (document.visibilityState === 'hidden') { if (cloud.dirty) { clearTimeout(cloud.timer); cloudPush(); } } else cloudSync(false); });
 window.addEventListener('online', () => { if (loggedIn() && cloud.dirty) cloudPush(); });
+
+/* ---------- Community backend ----------
+   CB is the community store. Inside Claude it wraps window.claude's db (claudeCB); in the web app it talks to
+   Supabase tables public.profiles and public.posts (supaCB). The community views in app.js only use CB. */
+let CB = null;
+function claudeCB(db, me) {
+  return {
+    kind: 'claude',
+    setProfile: p => db.doc(`profiles/${me}`).set(p),
+    profiles: async () => { const q = await db.collection('profiles').limit(200).get(); return Object.fromEntries(q.docs.map(d => [d.id, d.data()])); },
+    profilesByIds: async ids => { const all = await CB.profiles(); return Object.fromEntries(ids.filter(id => all[id]).map(id => [id, all[id]])); },
+    setPost: post => db.doc(`posts/${me}/list/${post.id}`).set(post),
+    updatePost: (id, f) => db.doc(`posts/${me}/list/${id}`).update(f),
+    deletePost: id => db.doc(`posts/${me}/list/${id}`).delete(),
+    listPosts: async (ids, limit) => (await Promise.all(ids.map(id => db.collection(`posts/${id}/list`).orderBy('at', 'desc').limit(limit).get().then(q => q.docs.map(d => d.data())).catch(() => [])))).flat().sort((a, b) => b.at - a.at).slice(0, limit * 4),
+    getPost: async (author, id) => { const s = await db.doc(`posts/${author}/list/${id}`).get(); return s.exists ? s.data() : null; },
+    deleteAll: async () => { const q = await db.collection(`posts/${me}/list`).get(); await Promise.all(q.docs.map(x => db.doc(`posts/${me}/list/${x.id}`).delete())); await db.doc(`profiles/${me}`).delete(); }
+  };
+}
+const PROF_COLS = 'id,name,bio,avatar,goal,at';
+const profMap = rows => Object.fromEntries((rows || []).map(r => [r.id, { name: r.name, bio: r.bio, avatar: r.avatar, goal: r.goal, at: r.at }]));
+const uuidOk = id => /^[0-9a-f-]{36}$/i.test(id);
+function supaCB() {
+  const me = () => AUTH.user.id, J = b => JSON.stringify(b);
+  return {
+    kind: 'supabase',
+    setProfile: p => sbFetch('/rest/v1/profiles?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: J({ id: me(), name: p.name || '', bio: p.bio || '', avatar: p.avatar || '', goal: p.goal || '', at: p.at || Date.now() }) }),
+    profiles: async q => profMap(await sbFetch(`/rest/v1/profiles?select=${PROF_COLS}&order=at.desc&limit=100${q ? '&name=ilike.' + encodeURIComponent('*' + q.replace(/[*,()]/g, '') + '*') : ''}`, { method: 'GET' })),
+    profilesByIds: async ids => { ids = ids.filter(uuidOk); return ids.length ? profMap(await sbFetch(`/rest/v1/profiles?select=${PROF_COLS}&id=in.(${ids.join(',')})`, { method: 'GET' })) : {}; },
+    setPost: post => sbFetch('/rest/v1/posts?on_conflict=author,id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: J({ author: me(), id: post.id, at: post.at, data: Object.assign({}, post, { author: me() }) }) }),
+    updatePost: async (id, f) => { const p = await CB.getPost(me(), id); if (p) await CB.setPost(Object.assign(p, f)); },
+    deletePost: id => sbFetch(`/rest/v1/posts?author=eq.${me()}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    listPosts: async (ids, limit) => { ids = ids.filter(uuidOk); if (!ids.length) return []; const rows = await sbFetch(`/rest/v1/posts?select=data&author=in.(${ids.join(',')})&order=at.desc&limit=${limit * 4}`, { method: 'GET' }); return rows.map(r => r.data); },
+    getPost: async (author, id) => { if (!uuidOk(author)) return null; const rows = await sbFetch(`/rest/v1/posts?select=data&author=eq.${author}&id=eq.${encodeURIComponent(id)}`, { method: 'GET' }); return rows[0] ? rows[0].data : null; },
+    deleteAll: async () => { await sbFetch(`/rest/v1/posts?author=eq.${me()}`, { method: 'DELETE' }); await sbFetch(`/rest/v1/profiles?id=eq.${me()}`, { method: 'DELETE' }); }
+  };
+}
+/* Turn the Supabase community on or off depending on login state */
+function syncCommunity() {
+  if (IN_CLAUDE) return;
+  const on = loggedIn();
+  if (on && (!CB || CB.kind !== 'supabase' || UID !== AUTH.user.id)) { CB = supaCB(); UID = AUTH.user.id; feed = null; people = null; feedState = 'idle'; if (S.social && S.social.name) setTimeout(() => publishProfile().catch(() => {}), 0); }
+  if (!on && CB) { CB = null; UID = null; feed = null; people = null; feedState = 'idle'; }
+}
+/* Invite link: ?freund=<user id> opens that person's profile */
+function inviteLink() { return `${location.origin}${location.pathname}?freund=${UID}`; }
+async function shareInvite() {
+  const url = inviteLink(), text = L('Trainier mit mir in Repwerk Fitness. Folge mir hier:', 'Train with me in Repwerk Fitness. Follow me here:');
+  try { if (navigator.share) { await navigator.share({ title: 'Repwerk Fitness', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast(L('Link kopiert', 'Link copied')); } catch (e) { openSheet(`<h2 class="disp">${L('Einladungslink', 'Invite link')}</h2><input class="input" readonly value="${esc(url)}" onfocus="this.select()"><button class="btn btn-s btn-block" data-close-sheet>${L('Fertig', 'Done')}</button>`); }
+}
+let pendingFriend = (() => { try { return new URLSearchParams(location.search).get('freund'); } catch (e) { return null; } })();
+function handleInviteParam() {
+  const id = pendingFriend; if (!id || !S || !S.profile) return;
+  if (!CB) { if (cloudOn() && !loggedIn()) { view = 'community'; render(); toast(L('Melde dich an, um deinem Freund zu folgen', 'Sign in to follow your friend')); } return; }
+  pendingFriend = null; try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (id !== UID) { view = 'community'; render(); personSheet(id); }
+}
+document.addEventListener('input', e => {
+  if (e.target.id !== 'pq') return;
+  clearTimeout(peopleTimer); const v = e.target.value.trim();
+  peopleTimer = setTimeout(async () => { peopleQ = v; await loadPeople(); render(); const i = document.getElementById('pq'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (er) {} } }, 350);
+});
