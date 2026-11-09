@@ -260,6 +260,23 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 .wbars div { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
 .wbars i { display:block; width:100%; border-radius:6px 6px 2px 2px; }
 .goalline { position:absolute; left:0; right:0; border-top:2px dashed var(--ink-muted); }
+.daychip { display:inline-flex; align-items:center; gap:6px; border:0; border-radius:999px; padding:6px 12px; font-size:13px; font-weight:700; background:var(--surface-2); color:var(--ink-muted); }
+.daychip.tr { background:var(--ember-soft); color:var(--ember-ink); }
+.daychip svg:last-child { opacity:.7; }
+.coachcard { display:flex; align-items:center; gap:12px; width:100%; color:inherit; font:inherit; cursor:pointer; }
+.coachcard.due { border-color:var(--ember); background:linear-gradient(135deg, var(--ember-soft), var(--surface) 70%); }
+.coachcard b { font-size:16px; }
+.sugg { display:flex; gap:10px; align-items:flex-start; margin-top:10px; padding:10px 12px; border-radius:var(--r-md); background:var(--surface-2); font-size:14px; line-height:20px; }
+.sugg > svg { flex:none; margin-top:1px; color:var(--ember-ink); }
+.sugg > .grow > b { display:block; font-size:15px; } .sugg.first .cap { font-size:13px; line-height:18px; }
+.sugg .cap { display:block; }
+.sugg.up { background:color-mix(in srgb, var(--good) 14%, var(--surface)); } .sugg.up > svg, .sugg.up b { color:var(--good); }
+.sugg.hold > svg, .sugg.hold b { color:var(--warning); }
+.sugg .btn { flex:none; align-self:center; }
+.ckres { display:flex; flex-direction:column; gap:4px; }
+.ckres.chg { border-color:var(--ember); }
+.tag.good { background:color-mix(in srgb, var(--good) 16%, var(--surface)); color:var(--good); }
+.chips.wdpick { flex-wrap:nowrap; gap:6px; } .wdpick .chip { flex:1; min-width:0; padding:7px 0; text-align:center; }
 </style>
 </head>
 <body>

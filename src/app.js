@@ -105,12 +105,13 @@ function installCard() {
 const LS_KEY = 'repwerk-proto-v2';
 let S = null, DB = null, UID = null, saveTimer = null, dirty = false;
 const DESIGN0 = { theme: 'system', accent: 'ember', size: 'm', corners: 'round', ring: 'left' };
-function blank() { return { v: 2, profile: null, targets: null, pro: false, design: { ...DESIGN0 }, reminders: { training: true, meals: false, water: false }, days: {}, weights: [], workouts: [], active: null, planIndex: 0, routines: [], customEx: [], gyms: [], coach: { week: '', count: 0 }, chat: [], mealPlan: null, social: { name: '', bio: '', avatar: '' }, following: [], best: { days: 0, weeks: 0 }, lang: 'de', at: 0 }; }
+function blank() { return { v: 2, profile: null, targets: null, pro: false, design: { ...DESIGN0 }, reminders: { training: true, meals: false, water: false }, days: {}, weights: [], workouts: [], active: null, planIndex: 0, routines: [], customEx: [], gyms: [], coach: { week: '', count: 0 }, chat: [], mealPlan: null, social: { name: '', bio: '', avatar: '' }, following: [], best: { days: 0, weeks: 0 }, smart: { ...SMART0, checkins: [] }, lang: 'de', at: 0 }; }
 function migrate(o) {
   const b = blank(); const s = Object.assign(b, o || {});
   s.design = Object.assign({ ...DESIGN0 }, (o && o.design) || {}, o && o.theme ? { theme: o.theme } : {});
   if (s.mealPlan && s.mealPlan.v !== 2) s.mealPlan = null;
   s.social = Object.assign({ name: '', bio: '', avatar: '' }, s.social || {});
+  s.smart = Object.assign({ ...SMART0, checkins: [] }, s.smart || {}); if (!Array.isArray(s.smart.checkins)) s.smart.checkins = [];
   if (s.profile) s.profile = Object.assign({ duration: 60, experience: 'mittel', equipment: [], diet: 'alles', allergies: [], meals: 4 }, s.profile);
   if (s.active) s.active.exercises.forEach(x => { x.rest = x.rest ?? 90; x.note = x.note || ''; x.sets.forEach(st => st.type = st.type || 'n'); });
   return s;
@@ -379,6 +380,8 @@ function renderOnboarding() {
       readOb();
       if (st === 1) { const bad = !(p.age >= 14 && p.age <= 99) ? 'Bitte ein Alter zwischen 14 und 99 eingeben.' : !(p.height >= 120 && p.height <= 230) ? 'Bitte eine Größe zwischen 120 und 230 cm eingeben.' : !(p.weight >= 35 && p.weight <= 300) ? 'Bitte ein Gewicht zwischen 35 und 300 kg eingeben.' : ''; if (bad) { $('#ob-err').textContent = bad; return; } }
       if (st < OB_STEPS - 1) { ob.step++; renderOnboarding(); window.scrollTo(0, 0); return; }
+      if (S.profile && S.profile.goal !== p.goal) sm().adj = 0;
+      if (S.profile && S.smart && S.smart.wd && S.smart.wd.length !== Number(p.days)) S.smart.wd = null;
       S.profile = Object.assign({}, p); S.targets = calcTargets(p);
       if (!S.social.name && p.name) S.social.name = p.name;
       if (!S.weights.length || S.weights[S.weights.length - 1].kg !== p.weight) S.weights.push({ d: dayKey(), kg: p.weight });
@@ -418,11 +421,11 @@ function renderTabs() {
 }
 function nextRoutine() { return planRoutines()[nextPlanIndex()]; }
 function vFood() {
-  const d = foodDay(), t = dayTotals(d), g = S.targets, used = today().photos || 0, k = foodKey || dayKey(), isToday = k === dayKey();
+  const d = foodDay(), t = dayTotals(d), g = dayTargets(foodKey || dayKey()), used = today().photos || 0, k = foodKey || dayKey(), isToday = k === dayKey();
   const dd = new Date(k + 'T12:00:00');
   return `${header('Essen', isToday ? 'Heute' : dd.toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long' }))}
     <div class="row" style="gap:8px"><button class="iconbtn" data-foodnav="-1" aria-label="Vorheriger Tag">${ic('back')}</button><button class="btn btn-s grow" data-nav="calendar" style="height:44px">${ic('cal', 18)} ${dd.toLocaleDateString(LOC(), { weekday: 'short', day: 'numeric', month: 'short' })}</button><button class="iconbtn" data-foodnav="1" aria-label="Nächster Tag" ${isToday ? 'disabled style="opacity:.35"' : ''}>${ic('next')}</button>${isToday ? '' : '<button class="btn btn-g" data-foodnav="0">Heute</button>'}</div>
-    <div class="card"><div class="cap" style="margin-bottom:6px">Verbleibende Kalorien</div>${eqRow(g.kcal, t.kcal)}
+    <div class="card"><div class="row" style="justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap"><span class="cap">Verbleibende Kalorien</span>${dayTypeChip(g)}</div>${eqRow(g.kcal, t.kcal)}
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${macroRow('Protein','p-bg',t.p,g.p)}${macroRow('Kohlenhydrate','c-bg',t.c,g.c)}${macroRow('Fett','f-bg',t.f,g.f)}</div>
     <div class="row" style="margin-top:12px;gap:8px"><span style="color:var(--protein)">${ic('drop', 18)}</span><span class="grow cap">Wasser ${fmt1((d.water || 0) / 1000)} von ${fmt1(g.water / 1000)} l</span><button class="btn btn-g" data-act="water">+ 250 ml</button></div>
     <button class="btn btn-s btn-block" data-act="daynut" style="margin-top:10px;height:42px">${ic('stats', 18)} Nährwerte</button></div>
@@ -464,7 +467,7 @@ function startSteps() {
     <ol class="steplist">${steps.map(([t, s, ok, act], i) => `<li class="${ok ? 'ok' : ''}"><span class="stepn">${ok ? ic('check', 16) : i + 1}</span><span class="grow"><b>${t}</b><span class="cap" style="display:block">${s}</span></span>${ok ? '' : `<button class="btn btn-p btn-sm" data-act="${act === 'start' ? 'startnext' : act}">Los</button>`}</li>`).join('')}</ol></div>`;
 }
 function vHome() {
-  const d = today(), t = dayTotals(d), g = S.targets, nr = nextRoutine(), wk = S.workouts.filter(w => weekKey(new Date(w.start)) === weekKey()).length;
+  const d = today(), t = dayTotals(d), g = dayTargets(), nr = nextRoutine(), wk = S.workouts.filter(w => weekKey(new Date(w.start)) === weekKey()).length;
   const dateStr = new Date().toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long' });
   const pLeft = r0(g.p - t.p), kLeft = r0(g.kcal - t.kcal), water = d.water || 0;
   let rec;
@@ -473,14 +476,15 @@ function vHome() {
   else if (kLeft < -150) rec = `Heute ${fmt(-kLeft)} kcal über dem Ziel. Kein Drama: Ein Tag zählt wenig, der Wochenschnitt zählt.`;
   else if (pLeft <= 0) rec = 'Proteinziel erreicht. Stark. Der Rest des Tages darf entspannt sein.';
   else rec = `Noch ${fmt(kLeft)} kcal und ${pLeft} g Protein. Du liegst gut im Plan.`;
-  const meals = SLOTS.filter(([s]) => (d.meals[s] || []).length).length, trainedToday = trainedOn(dayKey()), isTrainDay = wk < S.profile.days;
+  const meals = SLOTS.filter(([s]) => (d.meals[s] || []).length).length, trainedToday = trainedOn(dayKey()), isTrainDay = wk < S.profile.days && dayType() !== 'rest';
   const row = (icon, color, title, sub, action) => `<li class="dayrow"><span class="dayic" style="--c:${color}">${ic(icon, 20)}</span><span class="grow" style="min-width:0"><b>${title}</b><span class="cap" style="display:block">${sub}</span></span>${action}</li>`;
   const mb = (label, cls, v, goal) => `<div class="mcol"><span class="lbl">${label}</span><div class="track"><div class="fill ${cls}" style="width:${Math.min(100, goal ? v / goal * 100 : 0)}%"></div></div><span class="num cap"><b style="color:var(--ink);font-size:15px">${fmt(v)}</b> / ${fmt(goal)} g</span></div>`;
   return `${header(S.profile.name ? 'Hallo ' + esc(S.profile.name) : 'Heute', dateStr)}
     <div class="card hero"><div style="display:flex;justify-content:center">${ring(172, t.kcal, g.kcal)}</div><div class="mcols">${mb('Protein', 'p-bg', t.p, g.p)}${mb('Kohlenhydrate', 'c-bg', t.c, g.c)}${mb('Fett', 'f-bg', t.f, g.f)}</div>
-      <div class="row herofoot"><span class="grow cap">Tagesziel ${fmt(g.kcal)} kcal</span>${infoBtn('ring')}${infoBtn('macros').replace('aria-label="Was bedeutet das?"', 'aria-label="Was sind Makros?"')}</div></div>
+      ${dayTypeChip(g) ? `<div style="display:flex;justify-content:center">${dayTypeChip(g)}</div>` : ''}<div class="row herofoot"><span class="grow cap">Tagesziel ${fmt(g.kcal)} kcal</span>${infoBtn('ring')}${infoBtn('macros').replace('aria-label="Was bedeutet das?"', 'aria-label="Was sind Makros?"')}</div></div>
     ${installCard()}
     ${startSteps()}
+    ${checkinDue() ? coachCard() : ''}
     ${secHead('Dein Tag')}
     <ul class="card daylist">
       ${S.active ? row('play', 'var(--ember)', esc(S.active.name) + ' läuft', `${dur(elapsed(S.active))} · ${doneCount(S.active)} Sätze erledigt`, `<button class="btn btn-p btn-sm" data-act="resume">Fortsetzen</button>`)
@@ -490,6 +494,7 @@ function vHome() {
       ${row('drop', 'var(--protein)', `${fmt1(water / 1000)} von ${fmt1(g.water / 1000)} l Wasser`, `<span class="track" style="display:block;height:6px;margin-top:6px;background:var(--surface-2);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${Math.min(100, water / g.water * 100)}%;background:var(--protein)"></span></span>`, `<button class="btn btn-s btn-sm" data-act="water">+ 250 ml</button>`)}
     </ul>
     <div class="tip"><span style="color:var(--ember-ink)">${ic('spark', 20)}</span><div><b>Tipp für dich</b><div>${rec}</div></div></div>
+    ${checkinDue() ? '' : coachCard()}
     ${streakCard()}
     <div class="quick">${[['cam', 'Scannen', 'data-act="photo"'], ['search', 'Suchen', 'data-act="search"'], ['cal', 'Kalender', 'data-nav="calendar"'], ['stats', 'Statistik', 'data-nav="stats"']].map(([i, l, a]) => `<button ${a}><span>${ic(i, 22)}</span>${l}</button>`).join('')}</div>
     ${adBanner()}`;
@@ -641,6 +646,7 @@ function startWorkout(routineId) {
   let r = null;
   if (routineId) r = routineId.startsWith('plan-') ? planRoutines().find(x => x.id === routineId) : S.routines.find(x => x.id === routineId);
   S.active = { id: uid(), name: r ? (isEN() ? tr(r.name) : r.name) : (isEN() ? 'Workout' : 'Training'), routineId: r ? r.id : null, start: Date.now(), exercises: r ? r.exercises.map(x => { const ps = prevSets(x.exId); return { exId: x.exId, rest: x.rest ?? 90, note: x.note || '', target: x.target || '', sets: x.sets.map((s, i) => ({ type: s.type || 'n', kg: Math.round((s.kg || (ps && ps[i] ? ps[i].kg : (ps ? ps[ps.length - 1].kg : 0))) * 4) / 4, reps: s.reps || 0, done: false })) }; }) : [] };
+  { const rd = readiness(); S.active.exercises.forEach(x => { x.sug = suggestLoad(x.exId, x.target, null, rd); applySug(x); }); }
   save(); view = 'workout'; render(); window.scrollTo(0, 0);
   if (!r) setTimeout(() => pickExercises(ids => { ids.forEach(id => S.active.exercises.push(Object.assign(newExEntry(id), { sets: newExEntry(id).sets.map(s => ({ ...s, done: false })) }))); save(); render(); }), 150);
 }
@@ -654,6 +660,7 @@ function vWorkout() {
       return `<div class="card"><div class="row"><button class="thumb" data-ex="${x.exId}" style="padding:2px;border:0" aria-label="${esc(e.name)} Anleitung">${exIcon(e)}</button><button class="exname grow" data-ex="${x.exId}">${esc(e.name)}</button><button class="iconbtn" style="width:38px;height:38px;background:transparent" data-xmenu="${xi}" aria-label="Optionen">${ic('dots', 20)}</button></div>
       <input class="note" data-wnote="${xi}" value="${esc(x.note)}" placeholder="Notiz hinzufügen">
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="pill" data-wrest="${xi}">${ic('timer', 16)} Pause: ${restLabel(x.rest)}</button>${x.target ? `<span class="cap">Ziel: ${esc(x.target)} Wdh.</span>` : ''}</div>
+      ${sugHTML(x, xi)}
       <div style="display:flex;flex-direction:column;gap:4px;margin-top:10px"><div class="hset head"><span>Satz</span><span style="text-align:center">Vorher</span><span style="text-align:center">kg</span><span style="text-align:center">Wdh.</span><span style="text-align:center">${ic('check', 14)}</span></div>
       ${x.sets.map((s, si) => { const pv = ps && ps[si] ? `${fmt1(ps[si].kg)} kg × ${ps[si].reps}` : '–';
         return `<div class="hset ${s.done ? 'done' : ''}"><button class="stype ${s.type}" data-wtype="${xi}:${si}" aria-label="Satz ${si + 1}: ${TYPES[s.type]}. Tippen zum Ändern">${setLabel(x.sets, si)}</button><span class="prev" data-prevfill="${xi}:${si}">${pv}</span><input inputmode="decimal" aria-label="Gewicht Satz ${si + 1}" data-kg="${xi}:${si}" value="${s.kg ? dec(s.kg) : ''}" placeholder="${ps && ps[si] ? dec(ps[si].kg) : '0'}"><input inputmode="numeric" aria-label="Wiederholungen Satz ${si + 1}" data-reps="${xi}:${si}" value="${s.reps || ''}" placeholder="${ps && ps[si] ? ps[si].reps : (parseInt(x.target) || 10)}"><button class="check ${s.done ? 'on' : ''}" data-done="${xi}:${si}" aria-label="Satz ${si + 1} erledigt">${ic('check', 18)}</button></div>`; }).join('')}</div>
@@ -750,7 +757,7 @@ function summarySheet(a, posted, streakBefore) {
     ${recs.length ? `<div class="card" style="border-color:var(--good)"><div class="lbl" style="display:flex;gap:6px;align-items:center;color:var(--good)">${ic('trophy', 18)} ${recs.length} neue${recs.length === 1 ? 'r' : ''} Rekord${recs.length === 1 ? '' : 'e'}</div><ul class="list">${recs.map(r => `<li><div class="grow"><div style="font-weight:600">${esc(exOf(r.exId).name)}</div><div class="cap">${REC[r.kind]}</div></div><span class="num" style="font-weight:700">${recVal(r)}</span></li>`).join('')}</ul></div>` : ''}
     <div class="card"><div class="lbl" style="margin-bottom:6px">Übungen</div><ul class="list">${a.exercises.map(x => { const b = best(x); return `<li><div class="grow"><div style="font-weight:600">${esc(exOf(x.exId).name)}</div><div class="cap">${x.sets.length} Sätze · bester Satz ${fmt1(b.kg)} kg × ${b.reps}</div></div></li>`; }).join('')}</ul></div>
     ${Object.keys(musc).length ? `<div class="card"><div class="lbl" style="margin-bottom:10px">Trainierte Muskeln</div>${Object.entries(musc).sort((x, y) => y[1] - x[1]).map(([m, n]) => `<div class="row" style="gap:10px;margin-bottom:6px"><span style="width:84px;font-size:14px">${esc(m)}</span><div class="grow" style="height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden"><div style="height:100%;width:${n / mmax * 100}%;background:var(--ember)"></div></div><span class="num cap" style="width:52px;text-align:right">${n} Sätze</span></div>`).join('')}</div>` : ''}
-    <div class="card soft"><div class="lbl" style="color:var(--ember-ink)">Nach dem Training</div><div>Noch ${Math.max(0, r0(S.targets.p - dayTotals(today()).p))} g Protein bis zum Tagesziel. Eine proteinreiche Mahlzeit in den nächsten Stunden hilft der Regeneration.</div></div>
+    ${nextTimeHTML(a)}
     <button class="btn btn-p btn-block" data-close-sheet>Fertig</button>`);
 }
 function workoutDetailHTML(w, opts = {}) {
@@ -899,11 +906,15 @@ function vProfile() {
     <div class="lbl">Fortschritt</div>${progressHTML()}`;
 }
 function vSettings() {
-  const p = S.profile, g = S.targets, d = S.design;
+  const p = S.profile, g = baseTargets(), d = S.design, cd = cycleDelta();
   return `<div class="row"><button class="iconbtn" data-nav="profile" aria-label="Zurück">${ic('back')}</button><h1 class="disp grow">Einstellungen</h1></div>
     <div class="card"><div class="lbl">Ziele</div><div class="cap" style="margin-top:4px">${GOALS[p.goal]} · ${p.age} Jahre · ${p.height} cm · ${fmt1(p.weight)} kg · ${p.days}× ${p.duration} min · ${EXP[p.experience].split(' (')[0]} · ${p.location === 'home' ? 'zu Hause' : 'Studio'} · ${DIETS[p.diet]}${(p.allergies || []).length ? ' · ohne ' + p.allergies.map(a => ALLERGENS[a]).join(', ') : ''}</div>
       <div class="cap" style="margin-top:6px">Tagesziel ${fmt(g.kcal)} kcal · ${g.p} g Protein · ${g.c} g Kohlenhydrate · ${g.f} g Fett · ${fmt1(g.water / 1000)} l Wasser</div>
       <button class="btn btn-s btn-block" data-act="redo" style="margin-top:12px">Fragen erneut beantworten</button></div>
+    <div class="card" style="display:flex;flex-direction:column;gap:10px"><div class="lbl">${L('Smarter Coach', 'Smart coach')}</div>
+      <button class="sel" data-sm="cycleinfo" style="border:0;background:transparent;padding:0;text-align:left;width:100%"><div class="grow"><div style="font-weight:600">${L('Ziele passend zum Tag', 'Targets that fit the day')}</div><div class="cap">${S.smart.cycle && cd.up ? L(`Training ${fmt(g.kcal + cd.up)} kcal · Ruhe ${fmt(g.kcal - cd.down)} kcal · ${trainWeekdays().length} Trainingstage`, `Training ${fmt(g.kcal + cd.up)} kcal · rest ${fmt(g.kcal - cd.down)} kcal · ${trainWeekdays().length} training days`) : L('Aus', 'Off')}</div></div>${ic('next', 18)}</button>
+      <button class="sel" data-sm="checkin" style="border:0;background:transparent;padding:0;text-align:left;width:100%"><div class="grow"><div style="font-weight:600">${L('Wöchentlicher Check-in', 'Weekly check-in')}</div><div class="cap">${S.smart.adj ? L(`Bisher angepasst: ${sgn(S.smart.adj)} kcal`, `Adjusted so far: ${sgn(S.smart.adj)} kcal`) : L('Noch keine Anpassung', 'No adjustment yet')}</div></div>${ic('next', 18)}</button>
+      ${S.smart.adj ? `<button class="btn btn-g" data-sm="adjreset" style="align-self:flex-start">${L('Anpassungen zurücksetzen', 'Reset adjustments')}</button>` : ''}</div>
     <div class="card"><div class="lbl" style="margin-bottom:8px">Sprache</div><div class="seg" role="radiogroup" translate="no"><button class="${S.lang !== 'en' ? 'on' : ''}" data-lang="de">Deutsch</button><button class="${S.lang === 'en' ? 'on' : ''}" data-lang="en">English</button></div></div>
     <div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="lbl">Design</div>
       <div class="field"><span class="cap">Modus</span>${segm('theme', [['system','System'],['light','Hell'],['dark','Dunkel']], d.theme)}</div>
@@ -946,7 +957,7 @@ function streakCard() {
     <div class="cap">${ds === 0 ? 'Trag heute etwas ein, um eine Streak zu starten.' : !hasLog(dayKey()) && !trainedOn(dayKey()) ? 'Trag heute noch etwas ein, sonst endet deine Streak.' : `Rekord: ${S.best.days} Tage und ${S.best.weeks} Wochen am Stück.`}</div></div>`;
 }
 let calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-function dayStatus(k) { const d = S.days[k]; if (!d) return ''; const t = dayTotals(d); if (!t.kcal) return ''; const r = t.kcal / S.targets.kcal; return r >= 0.9 && r <= 1.1 ? 'good' : 'off'; }
+function dayStatus(k) { const d = S.days[k]; if (!d) return ''; const t = dayTotals(d); if (!t.kcal) return ''; const r = t.kcal / dayTargets(k).kcal; return r >= 0.9 && r <= 1.1 ? 'good' : 'off'; }
 function vCalendar() {
   const y = calMonth.getFullYear(), m = calMonth.getMonth(), first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(), off = (first.getDay() + 6) % 7, todayK = dayKey();
   let cells = ''; for (let i = 0; i < off; i++) cells += '<div></div>';
@@ -966,7 +977,7 @@ function vCalendar() {
     <p class="cap" style="margin:0">Tippe auf einen Tag, um Essen und Training zu sehen oder nachzutragen.</p>`;
 }
 function daySheet(k) {
-  const d = S.days[k], t = dayTotals(d), g = S.targets, ws = S.workouts.filter(w => dayKey(new Date(w.start)) === k), date = new Date(k + 'T12:00:00');
+  const d = S.days[k], t = dayTotals(d), g = dayTargets(k), ws = S.workouts.filter(w => dayKey(new Date(w.start)) === k), date = new Date(k + 'T12:00:00');
   const meals = d ? SLOTS.map(([s, l]) => [l, d.meals[s] || []]).filter(x => x[1].length) : [];
   openSheet(`<div class="row" style="justify-content:space-between"><div><div class="cap">${date.toLocaleDateString(LOC(), { weekday: 'long' })}</div><h2 class="disp">${date.toLocaleDateString(LOC(), { day: 'numeric', month: 'long', year: 'numeric' })}</h2></div><button class="iconbtn" data-close-sheet aria-label="Schließen">${ic('x')}</button></div>
     <div class="card"><div class="row" style="justify-content:space-between"><div class="lbl">Ernährung</div><span class="num">${fmt(t.kcal)} / ${fmt(g.kcal)} kcal</span></div>
@@ -1040,7 +1051,7 @@ function vStats() {
     <div class="lbl" style="margin-top:4px">Sätze pro Muskelgruppe (30 Tage)</div>
     <div class="card">${Object.keys(musc).length ? Object.entries(musc).sort((x, y) => y[1] - x[1]).map(([m, n]) => `<div class="row" style="gap:10px;margin-bottom:8px"><span style="width:84px;font-size:14px">${esc(m)}</span><div class="grow" style="height:10px;background:var(--surface-2);border-radius:99px;overflow:hidden"><div style="height:100%;width:${n / mmax * 100}%;background:var(--ember)"></div></div><span class="num cap" style="width:30px;text-align:right">${n}</span></div>`).join('') : '<div class="cap">Noch keine Trainings in den letzten 30 Tagen.</div>'}</div>
     <div class="lbl" style="margin-top:4px">Ernährung (letzte 7 Tage)</div>
-    <div class="card stats3"><div><span class="cap">Ø Kalorien</span><b>${last7.length ? fmt(avg('kcal')) : '–'}</b><span class="cap">Ziel ${fmt(S.targets.kcal)}</span></div><div><span class="cap">Ø Protein</span><b>${last7.length ? fmt(avg('p')) + ' g' : '–'}</b><span class="cap">Ziel ${S.targets.p} g</span></div><div><span class="cap">Getrackt</span><b>${last7.length} / 7</b><span class="cap">Tage</span></div></div>`;
+    <div class="card stats3"><div><span class="cap">Ø Kalorien</span><b>${last7.length ? fmt(avg('kcal')) : '–'}</b><span class="cap">Ziel ${fmt(baseTargets().kcal)}</span></div><div><span class="cap">Ø Protein</span><b>${last7.length ? fmt(avg('p')) + ' g' : '–'}</b><span class="cap">Ziel ${S.targets.p} g</span></div><div><span class="cap">Getrackt</span><b>${last7.length} / 7</b><span class="cap">Tage</span></div></div>`;
 }
 
 function setLang(l) { S.lang = l === 'en' ? 'en' : 'de'; save(); applyLang(); }
@@ -1185,7 +1196,7 @@ const NUT = [
   ['chol', 'Cholesterin', 'mg'], ['na', 'Natrium', 'mg'], ['kal', 'Kalium', 'mg'], ['va', 'Vitamin A', 'µg'], ['vc', 'Vitamin C', 'mg'], ['ca', 'Calcium', 'mg'], ['fe', 'Eisen', 'mg']
 ];
 function nutGoals() {
-  const g = S.targets, w = S.profile.sex === 'w';
+  const g = nutRange === 'day' ? dayTargets(foodKey || dayKey()) : baseTargets(), w = S.profile.sex === 'w';
   return { kcal: [g.kcal, ''], p: [g.p, ''], c: [g.c, ''], f: [g.f, ''], fib: [30, 'mind.'], sug: [Math.round(g.kcal * 0.1 / 4), 'max.'], sat: [Math.round(g.kcal * 0.1 / 9), 'max.'], pufa: [null], mufa: [null], trans: [Math.round(g.kcal * 0.01 / 9 * 10) / 10, 'max.'],
     chol: [300, 'max.'], na: [2400, 'max.'], kal: [4000, ''], va: [w ? 700 : 850, ''], vc: [w ? 95 : 110, ''], ca: [1000, ''], fe: [w ? 16 : 11, ''] };
 }
@@ -1217,7 +1228,7 @@ function vNutrition() {
   const all = []; const bySlot = { fruehstueck: [], mittag: [], abend: [], snacks: [] };
   for (const k of keys) { const d = S.days[k]; if (!d) continue; for (const [s] of SLOTS) for (const e of d.meals[s] || []) { all.push(e); bySlot[s].push(e); } }
   const T = sumEntries(all), avg = {}; for (const k in T) if (typeof T[k] === 'number' && !k.startsWith('_')) avg[k] = T[k] / nDays; avg._none = T._none;
-  const g = S.targets, G = nutGoals(), endD = new Date(keys[keys.length - 1] + 'T12:00:00'), startD = new Date(keys[0] + 'T12:00:00');
+  const g = nutRange === 'day' ? dayTargets(foodKey || dayKey()) : baseTargets(), G = nutGoals(), endD = new Date(keys[keys.length - 1] + 'T12:00:00'), startD = new Date(keys[0] + 'T12:00:00');
   const label = nutRange === 'day' ? (keys[0] === dayKey() ? 'Heute' : endD.toLocaleDateString(LOC(), { weekday: 'short', day: 'numeric', month: 'short' })) : `${startD.toLocaleDateString(LOC(), { day: 'numeric', month: 'short' })} – ${endD.toLocaleDateString(LOC(), { day: 'numeric', month: 'short' })}`;
   const isLast = keys[keys.length - 1] >= dayKey();
   let body = '';
@@ -1423,7 +1434,7 @@ function bindMpConfig(root, p, redraw) {
 function mpDayLabels(n) { const out = []; for (let i = 0; i < n; i++) { const d = new Date(); d.setDate(d.getDate() + i); out.push({ key: dayKey(d), label: d.toLocaleDateString(LOC(), { weekday: 'short', day: 'numeric', month: 'numeric' }), wd: d.toLocaleDateString('de-DE', { weekday: 'long' }) }); } return out; }
 const MP_SLOTS = { 2: ['mittag', 'abend'], 3: ['fruehstueck', 'mittag', 'abend'], 4: ['fruehstueck', 'mittag', 'snacks', 'abend'], 5: ['fruehstueck', 'snacks', 'mittag', 'snacks', 'abend'] };
 async function generateMealPlan(p) {
-  const pr = S.profile, t = S.targets, slots = MP_SLOTS[p.meals] || MP_SLOTS[4], days = mpDayLabels(p.days);
+  const pr = S.profile, t = baseTargets(), slots = MP_SLOTS[p.meals] || MP_SLOTS[4], days = mpDayLabels(p.days);
   const slotNames = slots.map(s => SLOTS.find(x => x[0] === s)[1]).join(', ');
   const prepTxt = p.prep === '0' ? 'Kein Meal Prep: Gerichte werden frisch gekocht. Plane Zutaten so, dass sie sich zwischen den Rezepten überschneiden und nichts verdirbt.'
     : `Meal Prep ${p.prep === '1' ? 'einmal: am ersten Tag' : `zweimal: am ersten Tag (${days[0].wd}) und am ${days[Math.min(days.length - 1, 3)].wd}`}. In jeder Session werden Mittag- und Abendessen für die folgenden Tage vorgekocht und portioniert (höchstens 4 Tage im Kühlschrank haltbar, sonst einfrieren). Ein Rezept darf an mehreren Tagen vorkommen. Frühstück und Snacks gehen ohne Kochen in unter 5 Minuten.`;
@@ -1456,7 +1467,7 @@ const mpRecipe = id => S.mealPlan && S.mealPlan.recipes.find(r => r.id === id);
 function vMealPlan() {
   const mp = S.mealPlan && S.mealPlan.v === 2 ? S.mealPlan : null, back = `<div class="row"><button class="iconbtn" data-nav="food" aria-label="Zurück">${ic('back')}</button><h1 class="disp grow">Ernährungsplan</h1>${mp && !mpBusy ? `<button class="iconbtn" data-act="mpconfig" aria-label="Plan anpassen">${ic('gear')}</button>` : ''}</div>`;
   if (!sampleFn) return back + `<div class="banner">${aiOffText()}</div>`;
-  if (mpBusy) return back + `<div class="card" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 16px;text-align:center"><div class="spinner"></div><div style="font-weight:700">Erstelle deinen Plan …</div><div class="cap">Rezepte, Meal Prep und Einkaufsliste passend zu ${fmt(S.targets.kcal)} kcal und ${S.targets.p} g Protein. Das dauert etwa 30 bis 90 Sekunden.</div></div>`;
+  if (mpBusy) return back + `<div class="card" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 16px;text-align:center"><div class="spinner"></div><div style="font-weight:700">Erstelle deinen Plan …</div><div class="cap">Rezepte, Meal Prep und Einkaufsliste passend zu ${fmt(baseTargets().kcal)} kcal und ${baseTargets().p} g Protein. Das dauert etwa 30 bis 90 Sekunden.</div></div>`;
   if (!mp) { const p = mpDraft || (mpDraft = mpPrefs()); return back + `<div class="card soft"><div style="font-weight:700">So soll dein Plan aussehen</div><div class="cap" style="margin-top:4px">Wähle aus, dann erstellt die KI Rezepte, einen Meal-Prep-Plan und eine Einkaufsliste für einen Einkauf.</div></div>${mpErr ? `<div class="banner">${esc(mpErr)}</div>` : ''}<div class="card" id="mpcfg" style="display:flex;flex-direction:column;gap:14px">${mpConfigHTML(p)}</div><button class="btn btn-p btn-block" data-act="mpgen">${ic('spark', 18)} Plan erstellen</button><p class="cap" style="margin:0">Ein Vorschlag, keine medizinische Ernährungsberatung.</p>`; }
   const tabs = `<div class="seg"><button class="${mpTab === 'woche' ? 'on' : ''}" data-mptab="woche">Woche</button><button class="${mpTab === 'prep' ? 'on' : ''}" data-mptab="prep">Meal Prep</button><button class="${mpTab === 'shop' ? 'on' : ''}" data-mptab="shop">Einkauf</button></div>`;
   const pr = mp.prefs, info = `<div class="cap">${mp.days.length} ${mp.days.length === 1 ? 'Tag' : 'Tage'} · ${mp.recipes.length} Rezepte · ${pr.prep === '0' ? 'ohne Meal Prep' : 'Meal Prep ' + pr.prep + '× pro Woche'} · für ${pr.people} ${pr.people === 1 ? 'Person' : 'Personen'}</div>`;
@@ -1513,9 +1524,9 @@ function paywall(reason) {
 
 /* ---------- Coach ---------- */
 function coachContext() {
-  const t = dayTotals(today()), g = S.targets, p = S.profile, pl = plan();
+  const t = dayTotals(today()), g = dayTargets(), p = S.profile, pl = plan(), ck = lastCheckin(), tr = weightTrend(S);
   const last = S.workouts.slice(-3).map(w => ({ einheit: w.name, datum: dayKey(new Date(w.start)), saetze: doneCount(w), volumen_kg: r0(volume(w)), uebungen: w.exercises.map(e => `${exOf(e.exId).name}: ${e.sets.map(s => s.kg + 'x' + s.reps + (s.type !== 'n' ? '(' + TYPES[s.type] + ')' : '')).join(', ')}`) }));
-  return { ziel: GOALS[p.goal], erfahrung: EXP[p.experience], koerper: { alter: p.age, groesse_cm: p.height, gewicht_kg: p.weight, wunschgewicht_kg: p.targetWeight || null }, ernaehrung: DIETS[p.diet], unvertraeglichkeiten: (p.allergies || []).map(a => ALLERGENS[a]), trainingstage_pro_woche: p.days, minuten_pro_training: p.duration, ort: p.location === 'home' ? 'zu Hause' : 'Studio', plan: pl.name, naechste_einheit: nextRoutine().name, heute: { kcal: r0(t.kcal), protein: r0(t.p), kh: r0(t.c), fett: r0(t.f), wasser_ml: today().water || 0 }, tagesziel: { kcal: g.kcal, protein: g.p, kh: g.c, fett: g.f, wasser_ml: g.water }, letzte_trainings: last, gewichtsverlauf: S.weights.slice(-6) };
+  return { ziel: GOALS[p.goal], erfahrung: EXP[p.experience], koerper: { alter: p.age, groesse_cm: p.height, gewicht_kg: p.weight, wunschgewicht_kg: p.targetWeight || null }, ernaehrung: DIETS[p.diet], unvertraeglichkeiten: (p.allergies || []).map(a => ALLERGENS[a]), trainingstage_pro_woche: p.days, minuten_pro_training: p.duration, ort: p.location === 'home' ? 'zu Hause' : 'Studio', plan: pl.name, naechste_einheit: nextRoutine().name, heute: { kcal: r0(t.kcal), protein: r0(t.p), kh: r0(t.c), fett: r0(t.f), wasser_ml: today().water || 0 }, tagesziel: { kcal: g.kcal, protein: g.p, kh: g.c, fett: g.f, wasser_ml: g.water }, tagestyp: g.type === 'rest' ? 'Ruhetag' : 'Trainingstag', wochenschnitt_kcal: baseTargets().kcal, gewichtstrend_kg_pro_woche: tr.rate !== undefined ? r1(tr.rate) : null, letzter_checkin: ck, letzte_trainings: last, gewichtsverlauf: S.weights.slice(-6) };
 }
 function coach() {
   const wk = weekKey(); if (S.coach.week !== wk) S.coach = { week: wk, count: 0 };
