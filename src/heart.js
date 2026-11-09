@@ -11,21 +11,34 @@ const hrMax = () => Math.round(208 - 0.7 * (S.profile.age || 30));
 function hrZone(bpm) { const p = bpm / hrMax(); return p < 0.6 ? 1 : p < 0.7 ? 2 : p < 0.8 ? 3 : p < 0.9 ? 4 : 5; }
 const ZONE_COL = ['', 'var(--ink-muted)', 'var(--protein)', 'var(--good)', 'var(--warning)', 'var(--critical)'];
 const ZONE_NAME = () => ['', L('Locker', 'Easy'), L('Grundlage', 'Base'), L('Aerob', 'Aerobic'), L('Schwelle', 'Threshold'), L('Maximal', 'Max')];
-/* kcal per minute from heart rate (Keytel 2005), floored at 1.5 MET */
+/* All numbers are ACTIVE calories (like "active kcal" on sports watches): resting metabolism is excluded,
+   because it is already part of the daily calorie target. */
+const bodyKg = () => num(S.profile.weight) || 75;
+/* Active kcal per minute from heart rate: Keytel et al. (2005) minus resting (1 MET). Keytel comes from steady
+   cardio and overestimates lifting with rests, so it is scaled by 0.7 and kept between 0.5 and 9 MET above rest. */
 function kcalPerMinHR(bpm) {
-  const p = S.profile, w = num(p.weight) || 75, a = num(p.age) || 30;
+  const p = S.profile, w = bodyKg(), a = num(p.age) || 30, rest = w / 60;
+  if (bpm < 90) return rest;
   const m = (-55.0969 + 0.6309 * bpm + 0.1988 * w + 0.2017 * a) / 4.184, f = (-20.4022 + 0.4472 * bpm - 0.1263 * w + 0.074 * a) / 4.184;
-  const v = p.sex === 'm' ? m : p.sex === 'w' ? f : (m + f) / 2;
-  return Math.max(1.5 * w / 60, Math.min(20, v));
+  const gross = p.sex === 'm' ? m : p.sex === 'w' ? f : (m + f) / 2;
+  return Math.max(0.5 * rest, Math.min(9 * rest, (gross - rest) * 0.7));
 }
-const MET_STRENGTH = 5;
-const kcalEstimate = (sec) => MET_STRENGTH * (num(S.profile.weight) || 75) * sec / 3600;
+/* Without heart rate: MET for strength training from training density (working sets per hour), 3 to 6 MET
+   (Compendium of Physical Activities: resistance training 3.5 moderate … 6 vigorous). */
+function workSets(a) { return (a.exercises || []).reduce((n, x) => n + x.sets.filter(s => s.done && s.type !== 'w').length, 0); }
+function strengthMET(a, sec) { if (sec < 300) return 3.5; const sph = workSets(a) / (sec / 3600); return Math.max(3, Math.min(6, 3 + 0.06 * sph)); }
+const kcalEstimate = (sec, a) => sec < 60 ? 0 : (strengthMET(a, sec) - 1) * bodyKg() * sec / 3600;
+/* Total for a workout of a given length: measured part from heart rate + estimate for the rest */
+function kcalFor(a, sec, h = a.hrk || (a.hrKcal != null ? { kcal: a.hrKcal, sec: a.hrSec } : null)) {
+  if (!h || !h.sec) return Math.round(kcalEstimate(sec, a));
+  if (sec <= h.sec) return Math.round(h.kcal * sec / h.sec);
+  return Math.round(h.kcal + (sec - h.sec >= 60 ? (strengthMET(a, sec) - 1) * bodyKg() * (sec - h.sec) / 3600 : 0));
+}
 /* Live accumulation on the running workout */
 function hrState(a) { return a.hrk || (a.hrk = { kcal: 0, sec: 0, samples: [], max: 0, sum: 0, n: 0 }); }
 function workoutKcal(a) {
   if (a.kcal != null) return a.kcal;
-  const h = a.hrk, total = (a.dur != null ? a.dur : elapsed(a)) / 1000;
-  return Math.round((h ? h.kcal : 0) + kcalEstimate(Math.max(0, total - (h ? h.sec : 0))));
+  return kcalFor(a, (a.dur != null ? a.dur : elapsed(a)) / 1000);
 }
 let hrLastTick = 0, hrSampleAt = 0, hrSaveAt = 0;
 setInterval(() => {
@@ -95,20 +108,30 @@ function hrHelpSheet() {
     <div class="lbl">${L('Mit Zusatz-App', 'With an extra app')}</div>
     <p style="margin:0">${L('Apple Watch und Galaxy Watch senden den Puls nicht von selbst. Apps wie „HR Broadcast“ oder „HeartBLE“ machen daraus einen normalen Pulssensor.', 'Apple Watch and Galaxy Watch don’t broadcast heart rate on their own. Apps such as “HR Broadcast” or “HeartBLE” turn them into a standard sensor.')}</p>
     <div class="lbl">${L('So rechnen wir Kalorien', 'How we calculate calories')}</div>
-    <p class="cap" style="margin:0">${L('Mit Puls nach der Formel von Keytel und Kollegen aus Puls, Gewicht, Alter und Geschlecht. Ohne Puls schätzen wir Krafttraining mit 5 MET über die aktive Trainingszeit. Beides sind Näherungen; Zahlen von deiner Uhr kannst du beim Speichern übernehmen.', 'With heart rate using the formula by Keytel et al. from heart rate, weight, age and sex. Without heart rate we estimate strength training at 5 METs over active time. Both are approximations; you can use your watch’s number when saving.')}</p>
+    <p class="cap" style="margin:0">${L('Wir zeigen wie Sportuhren die aktiven Kalorien, also ohne den Grundumsatz, den dein Tagesziel schon enthält. Mit Puls rechnen wir nach Keytel und Kollegen aus Puls, Gewicht, Alter und Geschlecht, für Krafttraining etwas vorsichtiger. Ohne Puls schätzen wir aus Dauer, Körpergewicht und wie viele Sätze du pro Stunde machst: meist 150 bis 350 kcal pro Stunde. Zahlen von deiner Uhr kannst du beim Speichern übernehmen.', 'Like sports watches we show active calories, without your resting metabolism, which your daily target already includes. With heart rate we use Keytel et al. (heart rate, weight, age, sex), a bit more conservatively for lifting. Without heart rate we estimate from duration, body weight and sets per hour: usually 150 to 350 kcal per hour. You can use your watch’s number when saving.')}</p>
     ${hrSupported() ? `<button class="btn btn-p btn-block" data-hr="connect">${L('Gerät verbinden', 'Connect device')}</button>` : ''}`);
 }
 /* Finish sheet: kcal field, prefilled */
 function kcalFieldHTML(a, d) {
-  const v = d.kcal != null ? d.kcal : workoutKcal(a), h = a.hrk, fromHr = h && h.sec > 30;
-  return `<div class="field"><span class="lbl">${ic('flame', 16)} ${L('Verbrannte Kalorien', 'Calories burned')}</span><div class="row" style="gap:10px"><span class="unit" style="max-width:140px"><input class="input" id="f-kcal" inputmode="numeric" value="${v}" aria-label="${L('Kalorien', 'Calories')}"><span>kcal</span></span><span class="cap grow">${fromHr ? L(`Aus deinem Puls (Ø ${Math.round(h.sum / h.n)}, max. ${h.max} bpm).`, `From your heart rate (avg ${Math.round(h.sum / h.n)}, max ${h.max} bpm).`) : L('Geschätzt. Zeigt deine Uhr einen anderen Wert, trag ihn hier ein.', 'Estimated. If your watch shows a different number, enter it here.')}</span></div></div>`;
+  const v = d.kcal != null && d.kcalManual ? d.kcal : kcalFor(a, d.min * 60), h = a.hrk, fromHr = h && h.sec > 30;
+  return `<div class="field"><span class="lbl">${ic('flame', 16)} ${L('Verbrannte Kalorien (aktiv)', 'Calories burned (active)')}</span><div class="row" style="gap:10px"><span class="unit" style="max-width:140px"><input class="input" id="f-kcal" inputmode="numeric" value="${v}" ${d.kcalManual ? 'data-manual="1"' : ''} aria-label="${L('Kalorien', 'Calories')}"><span>kcal</span></span><span class="cap grow">${fromHr ? L(`Aus deinem Puls (Ø ${Math.round(h.sum / h.n)}, max. ${h.max} bpm).`, `From your heart rate (avg ${Math.round(h.sum / h.n)}, max ${h.max} bpm).`) : L('Geschätzt. Zeigt deine Uhr einen anderen Wert, trag ihn hier ein.', 'Estimated. If your watch shows a different number, enter it here.')}</span></div></div>`;
 }
-function finalizeKcal(a, typed) {
-  const est = workoutKcal(Object.assign({}, a, { kcal: null })), h = a.hrk, n = Math.round(num(typed));
-  a.kcal = n > 0 && n < 5000 ? n : est; a.kcalSrc = n > 0 && Math.abs(n - est) > Math.max(5, est * 0.05) ? 'manual' : (h && h.sec > 30 ? 'hr' : 'est');
+function finalizeKcal(a, typed, manual) {
+  const h = a.hrk, est = kcalFor(a, wDur(a) / 1000), n = Math.round(num(typed));
+  const isManual = manual && n >= 0 && n < 5000 && typed !== null && typed !== '';
+  a.kcal = isManual ? n : est; a.kcalSrc = isManual ? 'manual' : (h && h.sec > 30 ? 'hr' : 'est');
+  if (h && h.sec) { a.hrKcal = Math.round(h.kcal); a.hrSec = Math.round(h.sec); }
   if (h && h.n) a.hr = { avg: Math.round(h.sum / h.n), max: h.max, samples: h.samples.slice(), device: HR.name || (S.hrDevice && S.hrDevice.name) || '' };
   delete a.hrk;
 }
+/* After the duration of a saved workout changes */
+function recalcKcal(w) { if (w.kcalSrc === 'manual' || w.kcal == null) return; w.kcal = kcalFor(w, wDur(w) / 1000); }
+/* Finish sheet: duration and calories stay in step until the user types their own number */
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'f-kcal') { t.dataset.manual = '1'; return; }
+  if (t.id === 'f-dur' && S.active) { const k = document.getElementById('f-kcal'); const m = Math.round(num(t.value)); if (k && !k.dataset.manual && m > 0) k.value = kcalFor(S.active, m * 60); }
+});
 /* Summary and details */
 function hrChartSVG(samples, w = 320, h = 80) {
   if (!samples || samples.length < 3) return '';
@@ -119,7 +142,7 @@ function hrChartSVG(samples, w = 320, h = 80) {
 function hrSummaryHTML(a) {
   if (a.kcal == null && !a.hr) return '';
   const src = { hr: L('aus Puls', 'from heart rate'), manual: L('von deiner Uhr', 'from your watch'), est: L('geschätzt', 'estimated') }[a.kcalSrc] || '';
-  return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-end"><div><div class="cap">${ic('flame', 14)} ${L('Verbrannt', 'Burned')}</div><div class="disp" style="font-size:22px">${fmt(a.kcal)} kcal</div><div class="cap">${src}</div></div>${a.hr ? `<div style="text-align:right"><div class="cap">${ic('heart', 14)} ${L('Puls', 'Heart rate')}</div><div class="disp" style="font-size:22px">Ø ${a.hr.avg}</div><div class="cap">max. ${a.hr.max} bpm</div></div>` : ''}</div>${a.hr ? hrChartSVG(a.hr.samples) : ''}</div>`;
+  return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-end"><div><div class="cap">${ic('flame', 14)} ${L('Verbrannt (aktiv)', 'Burned (active)')}</div><div class="disp" style="font-size:22px">${fmt(a.kcal)} kcal</div><div class="cap">${src}</div></div>${a.hr ? `<div style="text-align:right"><div class="cap">${ic('heart', 14)} ${L('Puls', 'Heart rate')}</div><div class="disp" style="font-size:22px">Ø ${a.hr.avg}</div><div class="cap">max. ${a.hr.max} bpm</div></div>` : ''}</div>${a.hr ? hrChartSVG(a.hr.samples) : ''}</div>`;
 }
 const workoutKcalLine = w => w.kcal != null ? `${fmt(w.kcal)} kcal${w.hr ? ` · Ø ${w.hr.avg} bpm` : ''}` : '';
 const kcalBurnedOn = k => S.workouts.filter(w => dayKey(new Date(w.start)) === k && w.kcal != null).reduce((s, w) => s + w.kcal, 0);

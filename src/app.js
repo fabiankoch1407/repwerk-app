@@ -721,7 +721,7 @@ function finishWorkout() {
   };
   openSheet('', sh => {
     draw(sh);
-    const read = () => { d.min = Math.max(1, Math.min(600, Math.round(num(sh.querySelector('#f-dur').value)) || d.min)); d.name = sh.querySelector('#f-name').value.trim() || a.name; d.gym = sh.querySelector('#f-gym').value.trim(); d.note = sh.querySelector('#f-note').value.trim(); const kc = sh.querySelector('#f-kcal'); if (kc) d.kcal = Math.round(num(kc.value)) || null; };
+    const read = () => { d.min = Math.max(1, Math.min(600, Math.round(num(sh.querySelector('#f-dur').value)) || d.min)); d.name = sh.querySelector('#f-name').value.trim() || a.name; d.gym = sh.querySelector('#f-gym').value.trim(); d.note = sh.querySelector('#f-note').value.trim(); const kc = sh.querySelector('#f-kcal'); if (kc) { d.kcalManual = !!kc.dataset.manual; d.kcal = kc.value.trim() === '' ? null : Math.round(num(kc.value)); } };
     sh.addEventListener('change', async ev => { if (ev.target.matches('[data-fphoto]') && ev.target.files.length) { read(); if (await addPhotoFiles(ev.target.files, a.photos)) save(); draw(sh); } });
     sh.addEventListener('click', async ev => {
       const g = ev.target.closest('[data-gym]'); if (g) { read(); d.gym = g.dataset.gym; draw(sh); return; }
@@ -730,7 +730,7 @@ function finishWorkout() {
       if (!ev.target.closest('[data-fsave]')) return;
       read(); ev.target.closest('[data-fsave]').disabled = true;
       if (a.pausedAt) { a.pausedMs = (a.pausedMs || 0) + (Date.now() - a.pausedAt); a.pausedAt = null; } a.end = Date.now(); a.dur = d.min * 60000; a.name = d.name; a.gym = d.gym; a.note = d.note;
-      finalizeKcal(a, d.kcal);
+      finalizeKcal(a, d.kcal, d.kcalManual);
       const recs = findRecords(a), prs = [...new Set(recs.map(r => exOf(r.exId).name))];
       a.prs = prs; a.records = recs; const streakBefore = weekStreak();
       a.exercises.forEach(x => x.sets = x.sets.filter(s => s.done)); a.exercises = a.exercises.filter(x => x.sets.length);
@@ -755,8 +755,8 @@ function editTimeSheet(w) {
       const m = Math.round(num(sh.querySelector('#et-min').value)), s = new Date(sh.querySelector('#et-start').value);
       if (!(m >= 1 && m <= 600)) { sh.querySelector('#et-err').textContent = 'Bitte eine Dauer zwischen 1 und 600 Minuten eingeben.'; return; }
       if (isNaN(s) || s.getTime() > Date.now()) { sh.querySelector('#et-err').textContent = 'Bitte einen Beginn in der Vergangenheit wählen.'; return; }
-      w.start = s.getTime(); w.dur = m * 60000; w.end = w.start + w.dur; save(); closeSheet(); render(); toast('Dauer gespeichert');
-      if (w.posted && CB) { try { await CB.updatePost(w.id, { start: w.start, end: w.end, dur: w.dur }); } catch (e) {} }
+      w.start = s.getTime(); w.dur = m * 60000; w.end = w.start + w.dur; recalcKcal(w); save(); closeSheet(); render(); toast('Dauer gespeichert');
+      if (w.posted && CB) { try { await CB.updatePost(w.id, { start: w.start, end: w.end, dur: w.dur, kcal: w.kcal ?? null }); } catch (e) {} }
     }));
 }
 function summarySheet(a, posted, streakBefore) {
@@ -1143,14 +1143,15 @@ async function onClick(e) {
   if (d.raddset) { const x = R.exercises[+d.raddset], prev = x.sets[x.sets.length - 1]; x.sets.push({ type: 'n', kg: prev ? prev.kg : 0, reps: prev ? prev.reps : 10 }); render(); return; }
   switch (d.act) {
     case 'plus': openSheet(`<h2 class="disp">Hinzufügen</h2><div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn btn-p btn-block" data-q="photo">${ic('cam', 20)} Essen oder Wasser scannen</button>
+      ${S.active ? `<button class="btn btn-p btn-block" data-q="start">${ic('play', 20)} ${L('Training fortsetzen', 'Resume workout')}</button>` : `<button class="btn btn-p btn-block" data-q="empty">${ic('db', 20)} ${L('Leeres Training starten', 'Start empty workout')}</button>
+      <button class="btn btn-s btn-block" data-q="start">${ic('play', 20)} ${L(`Plan starten: ${esc(nextRoutine().name)}`, `Start plan: ${esc(tr(nextRoutine().name))}`)}</button>`}
+      <button class="btn btn-s btn-block" data-q="photo">${ic('cam', 20)} Essen oder Wasser scannen</button>
       <button class="btn btn-s btn-block" data-q="barcode">${ic('barcode', 20)} Barcode scannen</button>
       <button class="btn btn-s btn-block" data-q="textfood">${ic('text', 20)} Mahlzeit beschreiben</button>
       <button class="btn btn-s btn-block" data-q="search">${ic('search', 20)} Lebensmittel suchen</button>
       <button class="btn btn-s btn-block" data-q="water">${ic('drop', 20)} 250 ml Wasser</button>
-      <button class="btn btn-s btn-block" data-q="start">${ic('db', 20)} ${S.active ? 'Training fortsetzen' : 'Training starten'}</button>
       <button class="btn btn-s btn-block" data-q="weight">${ic('chart', 20)} Gewicht eintragen</button></div>`, sh => sh.addEventListener('click', ev => { const q = ev.target.closest('[data-q]'); if (!q) return; closeSheet(); const k = q.dataset.q; pendingSlot = null;
-        if (k === 'photo') photoFlow(); else if (k === 'barcode') barcodeSheet(); else if (k === 'textfood') textFlow(); else if (k === 'search') searchSheet(); else if (k === 'water') { addWater(250); } else if (k === 'start') { S.active ? (view = 'workout', render()) : startWorkout(nextRoutine().id); } else { view = 'profile'; render(); setTimeout(() => { const i = $('#w-in'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } }, 60); } })); break;
+        if (k === 'photo') photoFlow(); else if (k === 'barcode') barcodeSheet(); else if (k === 'textfood') textFlow(); else if (k === 'search') searchSheet(); else if (k === 'water') { addWater(250); } else if (k === 'start') { S.active ? (view = 'workout', render()) : startWorkout(nextRoutine().id); } else if (k === 'empty') { startWorkout(); } else { view = 'profile'; render(); setTimeout(() => { const i = $('#w-in'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } }, 60); } })); break;
     case 'photo': pendingSlot = null; photoFlow(); break;
     case 'barcode': pendingSlot = null; barcodeSheet(); break;
     case 'textfood': pendingSlot = null; textFlow(); break;
