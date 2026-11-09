@@ -87,7 +87,7 @@ function makeApiSample() {
   return fn;
 }
 async function connectApi() {
-  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; render(); } } catch (e) { /* no server function: AI stays off */ }
+  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) setSB(j.supabase); render(); if (loggedIn()) cloudSync(false); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
 }
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S && S.profile && view === 'home') render(); });
@@ -117,7 +117,7 @@ function migrate(o) {
   return s;
 }
 function loadLocal() { try { const raw = localStorage.getItem(LS_KEY) || localStorage.getItem('repwerk-proto-v1'); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
-function save() { S.at = Date.now(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 900); }
+function save() { S.at = Date.now(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 900); if (!IN_CLAUDE) cloudSchedule(); }
 async function flush() { if (!DB || !UID || !dirty) return; dirty = false; try { await DB.doc(`data/users/${UID}/state`).set({ json: JSON.stringify(S), at: S.at }); } catch (e) { dirty = true; } }
 async function connectDb() {
   try {
@@ -323,6 +323,7 @@ function renderOnboarding() {
     <div class="seg" style="align-self:flex-end;width:200px" role="radiogroup" aria-label="Sprache" translate="no"><button class="${S.lang !== 'en' ? 'on' : ''}" data-lang="de">Deutsch</button><button class="${S.lang === 'en' ? 'on' : ''}" data-lang="en">English</button></div>
     <div style="display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding-top:4px"><span style="color:var(--ember)">${MARK(56)}</span>
       <div><div class="disp" style="font-size:34px;line-height:38px">Willkommen bei Repwerk Fitness</div><p class="muted" style="margin:8px 0 0">Essen fotografieren, Makros sehen, mit einem Plan trainieren, der zu dir passt. Ein paar Fragen, dann ist alles eingerichtet.</p></div></div>
+    ${onboardLoginBtn()}
     <label class="field"><span class="lbl">Wie sollen wir dich nennen? (optional)</span><input class="input" id="ob-name" value="${esc(p.name)}" placeholder="Vorname" autocomplete="given-name"></label>
     <div class="field"><span class="lbl">Was ist dein Hauptziel?</span>${chips('goal', Object.entries(GOALS))}</div>`;
   if (st === 1) body = `<h1 class="disp" style="padding-top:12px">Dein Körper</h1><p class="muted" style="margin:-6px 0 0">Daraus berechnen wir deinen Kalorienbedarf.</p>
@@ -483,6 +484,7 @@ function vHome() {
     <div class="card hero"><div style="display:flex;justify-content:center">${ring(172, t.kcal, g.kcal)}</div><div class="mcols">${mb('Protein', 'p-bg', t.p, g.p)}${mb('Kohlenhydrate', 'c-bg', t.c, g.c)}${mb('Fett', 'f-bg', t.f, g.f)}</div>
       ${dayTypeChip(g) ? `<div style="display:flex;justify-content:center">${dayTypeChip(g)}</div>` : ''}<div class="row herofoot"><span class="grow cap">Tagesziel ${fmt(g.kcal)} kcal</span>${infoBtn('ring')}${infoBtn('macros').replace('aria-label="Was bedeutet das?"', 'aria-label="Was sind Makros?"')}</div></div>
     ${installCard()}
+    ${accountHomeCard()}
     ${startSteps()}
     ${checkinDue() ? coachCard() : ''}
     ${secHead('Dein Tag')}
@@ -915,6 +917,7 @@ function vSettings() {
       <button class="sel" data-sm="cycleinfo" style="border:0;background:transparent;padding:0;text-align:left;width:100%"><div class="grow"><div style="font-weight:600">${L('Ziele passend zum Tag', 'Targets that fit the day')}</div><div class="cap">${S.smart.cycle && cd.up ? L(`Training ${fmt(g.kcal + cd.up)} kcal · Ruhe ${fmt(g.kcal - cd.down)} kcal · ${trainWeekdays().length} Trainingstage`, `Training ${fmt(g.kcal + cd.up)} kcal · rest ${fmt(g.kcal - cd.down)} kcal · ${trainWeekdays().length} training days`) : L('Aus', 'Off')}</div></div>${ic('next', 18)}</button>
       <button class="sel" data-sm="checkin" style="border:0;background:transparent;padding:0;text-align:left;width:100%"><div class="grow"><div style="font-weight:600">${L('Wöchentlicher Check-in', 'Weekly check-in')}</div><div class="cap">${S.smart.adj ? L(`Bisher angepasst: ${sgn(S.smart.adj)} kcal`, `Adjusted so far: ${sgn(S.smart.adj)} kcal`) : L('Noch keine Anpassung', 'No adjustment yet')}</div></div>${ic('next', 18)}</button>
       ${S.smart.adj ? `<button class="btn btn-g" data-sm="adjreset" style="align-self:flex-start">${L('Anpassungen zurücksetzen', 'Reset adjustments')}</button>` : ''}</div>
+    ${accountCardSettings()}
     <div class="card"><div class="lbl" style="margin-bottom:8px">Sprache</div><div class="seg" role="radiogroup" translate="no"><button class="${S.lang !== 'en' ? 'on' : ''}" data-lang="de">Deutsch</button><button class="${S.lang === 'en' ? 'on' : ''}" data-lang="en">English</button></div></div>
     <div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="lbl">Design</div>
       <div class="field"><span class="cap">Modus</span>${segm('theme', [['system','System'],['light','Hell'],['dark','Dunkel']], d.theme)}</div>

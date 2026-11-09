@@ -30,13 +30,29 @@ Die KI läuft über eine kleine Server-Funktion bei Cloudflare (`functions/api/a
 
 Solange kein Schlüssel eingetragen ist, zeigt die App bei den KI-Funktionen einen Hinweis und alles andere funktioniert normal.
 
+## Login und Cloud-Speicher einschalten (Supabase, kostenlos)
+
+Ohne Konto liegen alle Daten nur auf dem Handy. Mit Supabase melden sich Nutzer per E-Mail-Code an (kein Passwort), und ihre Daten sind auf jedem Gerät da.
+
+1. Auf [supabase.com](https://supabase.com) ein Projekt anlegen. Als Region **Central EU (Frankfurt)** wählen.
+2. **SQL Editor → New query**: den Inhalt von `supabase/setup.sql` einfügen und **Run** klicken. Das legt die Tabelle mit Zugriffsschutz an.
+3. **Authentication → Emails (Email Templates)**: in den Vorlagen **Magic Link** und **Confirm signup** den Link durch den Code ersetzen, zum Beispiel:
+   `<h2>Dein Repwerk-Code</h2><p>Gib diesen Code in der App ein: <strong>{{ .Token }}</strong></p>`
+4. **Project Settings → API Keys**: die **Project URL** und den **Publishable key** (`sb_publishable_…`) kopieren. Niemals den Secret key verwenden.
+5. In Cloudflare: dein Projekt → **Settings → Variables and Secrets** → zwei Variablen anlegen: `SUPABASE_URL` und `SUPABASE_PUBLISHABLE_KEY`. Danach **Deployments → Retry deployment**.
+
+Hinweis: Der eingebaute E-Mail-Versand von Supabase schickt nur wenige Mails pro Stunde. Für den Start mit echten Nutzern unter **Authentication → Emails → SMTP Settings** einen eigenen Anbieter eintragen (zum Beispiel Brevo oder Resend).
+
+In der App: **Profil → Einstellungen → Konto** zum Anmelden, Synchronisieren, Exportieren und Konto löschen.
+
 ## Projektaufbau
 
 | Datei / Ordner | Inhalt |
 | --- | --- |
 | `index.html` | Die fertige App (wird aus `src/` gebaut) |
-| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch) |
+| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync) |
 | `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` |
+| `supabase/setup.sql` | Datenbank-Einrichtung für Login und Sync |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installierbarkeit und Offline-Betrieb |
 | `build.py` | Baut `index.html` und `sw.js` aus `src/` (`python3 build.py`) |
 
