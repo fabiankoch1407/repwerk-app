@@ -37,7 +37,7 @@ async function verifyCode(email, token) { setAuth(sessionFrom(await sbFetch('/au
 /* ---------- Sync: whole state as one JSON document, newest wins ---------- */
 async function cloudPull() { const rows = await sbFetch(`/rest/v1/user_state?select=data,updated_at&user_id=eq.${AUTH.user.id}`, { method: 'GET' }); return rows && rows[0] ? rows[0].data : null; }
 async function cloudPush() {
-  if (!loggedIn() || cloud.busy) { cloud.dirty = true; return; }
+  if (!loggedIn() || cloud.busy || needConsent()) { cloud.dirty = true; return; }
   cloud.busy = true; cloud.dirty = false; cloud.state = 'syncing'; paintCloud();
   try {
     await sbFetch('/rest/v1/user_state?on_conflict=user_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.user.id, data: S, updated_at: new Date(S.at || Date.now()).toISOString() }) });
@@ -58,8 +58,10 @@ const summaryOf = d => {
   return L(`<span translate="no">${esc(d.profile.name || 'Ohne Namen')}</span> · ${w} ${w === 1 ? 'Training' : 'Trainings'} · ${f} ${f === 1 ? 'Tag' : 'Tage'} mit Essen · geändert ${when}`, `<span translate="no">${esc(d.profile.name || 'No name')}</span> · ${w} ${w === 1 ? 'workout' : 'workouts'} · ${f} ${f === 1 ? 'day' : 'days'} with food · changed ${when}`);
 };
 /* first: true right after logging in on this device */
+let consentAsked = false;
 async function cloudSync(first) {
   if (!loggedIn() || cloud.busy) return;
+  if (needConsent()) { if (!first && !consentAsked) { consentAsked = true; consentSheet(L('Neu: Damit wir deine Daten weiter in deinem Konto sichern dürfen, brauchen wir deine ausdrückliche Einwilligung. Ohne sie bleiben neue Daten nur auf diesem Gerät.', 'New: to keep backing up your data to your account we need your explicit consent. Without it, new data stays on this device only.')).then(ok => { if (ok) cloudSync(false); }); } return; }
   if (first) setTimeout(handleInviteParam, 1200);
   cloud.state = 'syncing'; paintCloud();
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
@@ -92,7 +94,8 @@ function loginSheet() {
     sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">${st.step === 'email' ? L('Anmelden', 'Sign in') : L('Code eingeben', 'Enter code')}</h2><button class="iconbtn" data-close-sheet aria-label="${L('Schließen', 'Close')}">${ic('x')}</button></div>
       ${st.step === 'email' ? `<p class="muted" style="margin:0">${L('Wir schicken dir einen Code per E-Mail. Kein Passwort nötig. Neu hier? Dann legen wir dein Konto automatisch an.', 'We email you a code. No password needed. New here? We create your account automatically.')}</p>
         <label class="field"><span class="lbl">${L('E-Mail', 'Email')}</span><input class="input" id="lg-mail" type="email" inputmode="email" autocomplete="email" value="${esc(st.email)}" placeholder="name@beispiel.de"></label>
-        <button class="btn btn-p btn-block" data-lg="send" ${st.busy ? 'disabled' : ''}>${st.busy ? L('Wird gesendet …', 'Sending …') : L('Code senden', 'Send code')}</button>`
+        ${needConsent() ? consentBox('lg-consent', st.consent) : ''}
+        <button class="btn btn-p btn-block" data-lg="send" ${st.busy || (needConsent() && !st.consent) ? 'disabled' : ''}>${st.busy ? L('Wird gesendet …', 'Sending …') : L('Code senden', 'Send code')}</button>`
       : `<p class="muted" style="margin:0">${L(`Wir haben einen Code an <b>${esc(st.email)}</b> geschickt. Schau auch im Spam-Ordner nach.`, `We sent a code to <b>${esc(st.email)}</b>. Check your spam folder too.`)}</p>
         <input class="input codein" id="lg-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" aria-label="${L('Code aus der E-Mail', 'Code from the email')}">
         <button class="btn btn-p btn-block" data-lg="verify" ${st.busy ? 'disabled' : ''}>${st.busy ? L('Wird geprüft …', 'Checking …') : L('Anmelden', 'Sign in')}</button>
@@ -103,7 +106,7 @@ function loginSheet() {
   };
   const go = async (sh, a) => {
     if (a === 'send' || a === 'resend') {
-      if (a === 'send') st.email = (sh.querySelector('#lg-mail').value || '').trim().toLowerCase();
+      if (a === 'send') { st.email = (sh.querySelector('#lg-mail').value || '').trim().toLowerCase(); if (needConsent() && !st.consent) return; }
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(st.email)) { st.err = L('Bitte gib eine gültige E-Mail-Adresse ein.', 'Please enter a valid email address.'); draw(sh); return; }
       st.busy = true; st.err = ''; draw(sh);
       try { await sendCode(st.email); st.step = 'code'; st.sentAt = Date.now(); const t = setInterval(() => { if (!sh.isConnected || Date.now() - st.sentAt > 61000) { clearInterval(t); if (sh.isConnected) draw(sh); return; } const b = sh.querySelector('[data-lg=resend]'); if (b) { const w = Math.max(0, 60 - Math.floor((Date.now() - st.sentAt) / 1000)); b.textContent = L(`Neuer Code in ${w} s`, `New code in ${w} s`); } }, 1000); }
@@ -114,13 +117,14 @@ function loginSheet() {
       const code = (sh.querySelector('#lg-code').value || '').replace(/\D/g, '');
       if (code.length < 6) { st.err = L('Der Code hat mindestens 6 Ziffern.', 'The code has at least 6 digits.'); draw(sh); return; }
       st.busy = true; st.err = ''; draw(sh);
-      try { await verifyCode(st.email, code); closeSheet(); cloud.state = 'idle'; render(); await cloudSync(true); }
+      try { await verifyCode(st.email, code); closeSheet(); cloud.state = 'idle'; if (st.consent) giveConsent(); render(); await cloudSync(true); if (st.consent && needConsent()) giveConsent(); }
       catch (e) { st.busy = false; st.err = cloudErr(e) || L('Der Code stimmt nicht oder ist abgelaufen. Fordere einen neuen an.', 'The code is wrong or has expired. Request a new one.'); draw(sh); }
     }
     if (a === 'back') { st.step = 'email'; st.err = ''; draw(sh); }
   };
   openSheet('', sh => { draw(sh);
     sh.addEventListener('click', ev => { const b = ev.target.closest('[data-lg]'); if (b && !b.disabled) go(sh, b.dataset.lg); });
+    sh.addEventListener('change', ev => { if (ev.target.id === 'lg-consent') { st.consent = ev.target.checked; st.email = (sh.querySelector('#lg-mail').value || '').trim(); draw(sh); } });
     sh.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.matches('input')) { ev.preventDefault(); go(sh, st.step === 'email' ? 'send' : 'verify'); } });
   });
 }
@@ -142,7 +146,7 @@ function accountCardSettings() {
     <div class="row" style="gap:12px"><span class="dayic" style="--c:var(--good)">${ic('check', 20)}</span><div class="grow" style="min-width:0"><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis" translate="no">${esc(AUTH.user.email)}</div><div class="cap cloudst" data-cloudstatus>${cloudStatusText()}</div></div></div>
     <div class="grid2"><button class="btn btn-s" data-cl="sync">${L('Jetzt sichern', 'Sync now')}</button><button class="btn btn-s" data-cl="export">${L('Exportieren', 'Export')}</button></div>
     <button class="btn btn-s btn-block" data-cl="logout">${L('Abmelden', 'Sign out')}</button>
-    <button class="btn btn-g" data-cl="delete" style="color:var(--critical);align-self:flex-start">${L('Konto löschen', 'Delete account')}</button></div>`;
+    <div class="row" style="gap:4px;flex-wrap:wrap"><button class="btn btn-g" data-cl="delete" style="color:var(--critical)">${L('Konto löschen', 'Delete account')}</button><button class="btn btn-g" data-cl="withdraw" style="color:var(--ink-muted)">${L('Einwilligung widerrufen', 'Withdraw consent')}</button></div></div>`;
 }
 function accountHomeCard() {
   if (!cloudOn() || loggedIn() || S.hideAccount) return '';
@@ -166,7 +170,10 @@ async function signOut() {
   applyDesign(); view = 'home'; render(); toast(L('Abgemeldet', 'Signed out'));
 }
 async function deleteAccount() {
-  if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it.'), L('Konto löschen', 'Delete account'), true)) return;
+  if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst. Ein laufendes Pro-Abo kündigst du separat.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it. Cancel a running Pro subscription separately.'), L('Konto löschen', 'Delete account'), true)) return;
+  await deleteAccountNow();
+}
+async function deleteAccountNow() {
   await deleteAllCloudPhotos();
   try { await sbFetch('/rest/v1/rpc/delete_user', { method: 'POST', body: '{}' }); }
   catch (e) { toast(cloudErr(e) || L('Löschen hat nicht geklappt. Versuch es noch mal.', 'Deleting didn’t work. Try again.')); return; }
@@ -183,6 +190,7 @@ document.addEventListener('click', e => {
   else if (a === 'export') exportData();
   else if (a === 'logout') signOut();
   else if (a === 'delete') deleteAccount();
+  else if (a === 'withdraw') withdrawConsent();
 });
 document.addEventListener('visibilitychange', () => { if (!loggedIn()) return; if (document.visibilityState === 'hidden') { if (cloud.dirty) { clearTimeout(cloud.timer); cloudPush(); } } else cloudSync(false); });
 window.addEventListener('online', () => { if (loggedIn() && cloud.dirty) cloudPush(); });
@@ -267,8 +275,11 @@ async function refreshPro() {
 }
 async function buyPro(plan) {
   if (!loggedIn()) { closeSheet(); loginSheet(); toast(L('Melde dich zuerst an, damit Pro mit deinem Konto verknüpft ist', 'Sign in first so Pro is linked to your account')); return; }
+  orderSheet(plan);
+}
+async function startCheckout(plan, consent) {
   toast(L('Öffne die sichere Zahlung …', 'Opening secure checkout …'));
-  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ plan }) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(Object.assign({ plan }, consent)) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
   if (r.ok && j.url) { location.href = j.url; return; }
   if (j.code === 'already_pro') { await refreshPro(); closeSheet(); toast(L('Du hast Pro schon', 'You already have Pro')); return; }
   if (j.code === 'login') { loginSheet(); return; }

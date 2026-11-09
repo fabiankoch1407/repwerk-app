@@ -13,10 +13,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Repwerk">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,700;112,800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/figtree.woff" as="font" type="font/woff" crossorigin>
+<script src="legal/anbieter.js"></script>
 <style>
+@font-face { font-family:"Figtree"; src:url("fonts/figtree.woff") format("woff"); font-weight:400 700; font-display:swap; }
+@font-face { font-family:"Archivo"; src:url("fonts/archivo-display.woff") format("woff"); font-weight:700 800; font-stretch:112%; font-display:swap; }
 /* Layout: one phone-width column, scrolling content, fixed tab bar; sheets slide up from the bottom. */
 :root {
   --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#EFEDE8; --line:#E4E2DD;
@@ -295,6 +296,11 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 .phstrip img { width:100%; height:100%; object-fit:cover; display:block; cursor:zoom-in; }
 .phstrip .phx { position:absolute; top:6px; right:6px; width:30px; height:30px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; display:grid; place-items:center; }
 .phfull { width:100%; max-height:75vh; object-fit:contain; border-radius:var(--r-md); background:#000; }
+.lfoot { display:flex; flex-wrap:wrap; justify-content:center; gap:4px 14px; padding:18px 0 6px; font-size:12px; }
+.lfoot a { color:var(--ink-muted); text-decoration:none; } .lfoot a:hover { text-decoration:underline; }
+.consent { display:flex; gap:10px; align-items:flex-start; font-size:14px; line-height:20px; cursor:pointer; }
+.consent input { width:20px; height:20px; flex:none; margin-top:1px; accent-color:var(--ember); }
+.consent a { color:var(--ember-ink); }
 </style>
 </head>
 <body>

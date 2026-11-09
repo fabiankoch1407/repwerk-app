@@ -24,7 +24,10 @@ export async function onRequestPost({ request, env }) {
   if (!env.STRIPE_SECRET_KEY || !env.SUPABASE_SECRET_KEY || !base(env)) return fail(503, 'pay_off');
   const user = await currentUser(env, request);
   if (!user) return fail(401, 'login');
-  const { plan } = await request.json().catch(() => ({}));
+  const { plan, terms, earlyStart } = await request.json().catch(() => ({}));
+  // The app's order summary collects acceptance of the terms and the express request to start before the
+  // withdrawal period ends (basis for pro-rata compensation on withdrawal, § 357a Abs. 2 BGB). Both are recorded on the subscription.
+  if (!terms || !earlyStart) return fail(400, 'consent_required');
   const price = plan === 'month' ? env.STRIPE_PRICE_MONTHLY : env.STRIPE_PRICE_YEARLY;
   if (!price) return fail(503, 'pay_off');
 
@@ -42,6 +45,9 @@ export async function onRequestPost({ request, env }) {
     client_reference_id: user.id,
     'metadata[user_id]': user.id,
     'subscription_data[metadata][user_id]': user.id,
+    'subscription_data[metadata][terms_accepted_at]': new Date().toISOString(),
+    'subscription_data[metadata][early_start_requested_at]': String(earlyStart).slice(0, 40),
+    'custom_text[submit][message]': 'Mit dem Klick schließt du ein kostenpflichtiges Abo von Repwerk Pro ab. Es verlängert sich automatisch, bis du kündigst (siehe AGB).',
     allow_promotion_codes: 'true',
     locale: 'auto',
   });

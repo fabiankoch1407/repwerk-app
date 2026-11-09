@@ -70,6 +70,7 @@ const aiOffText = () => IN_CLAUDE ? 'Die KI funktioniert, wenn du den Prototyp i
 function apiError(code) { const e = new Error(code); e.code = code; return e; }
 async function apiCall(body) {
   if (SRV.aiLogin && !loggedIn()) throw apiError('login');
+  if (needConsent()) { setTimeout(() => consentSheet(), 120); throw apiError('consent'); }
   let r;
   try { r = await fetch('api/ai', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
   const j = await r.json().catch(() => ({}));
@@ -173,7 +174,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appl
 /* ---------- Claude ---------- */
 let sampleFn = null, sampleImages = false;
 async function connectSample() { try { sampleFn = await claude.use('sample'); if (sampleFn) { const l = await sampleFn.limits().catch(() => null); sampleImages = !!(l && l.images); } } catch (e) { sampleFn = null; } render(); }
-const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
+const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.', consent: 'Bitte stimme zuerst der Verarbeitung deiner Gesundheitsdaten zu. Danach kannst du es noch einmal versuchen.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
 const ALLERGENS = { laktose: 'Laktose', gluten: 'Gluten', nuesse: 'Nüsse', ei: 'Ei', fisch: 'Fisch', soja: 'Soja' };
 const DIETS = { alles: 'Alles', vegetarisch: 'Vegetarisch', vegan: 'Vegan', pescetarisch: 'Pescetarisch' };
 function foodPrompt() {
@@ -411,7 +412,7 @@ function render() {
   syncCommunity();
   if (!S.profile) { renderOnboarding(); return; }
   const fn = { nutrition: vNutrition, mealplan: vMealPlan, calendar: vCalendar, stats: vStats, home: vHome, food: vFood, train: vTrain, community: vCommunity, profile: vProfile, settings: vSettings, workout: vWorkout, library: vLibrary, routine: vRoutine }[view] || vHome;
-  $('#app').innerHTML = `<div class="screen">${fn()}</div>`;
+  $('#app').innerHTML = `<div class="screen">${fn()}${view === 'workout' || view === 'routine' ? '' : legalFooter()}</div>`;
   $('#app').onclick = onClick; $('#app').onchange = onChange; $('#app').oninput = onInput;
   renderTabs();
 }
@@ -940,6 +941,7 @@ function vSettings() {
       <li>Fotos gehen nur zur Analyse an die KI, wenn du sie auswählst, und werden dafür nicht gespeichert.</li>
       <li>Deine Ernährungs-, Trainings- und Körperdaten sind privat. In der Community sichtbar ist nur, was du selbst teilst: Profil und geteilte Workouts.</li>
       <li>Die Werbebanner sind Platzhalter. In der App gibt es personalisierte Werbung nur mit deiner Einwilligung.</li></ul></div>
+    ${legalCardHTML()}
     <button class="btn btn-d btn-block" data-act="reset">Alle Daten löschen</button>`;
 }
 

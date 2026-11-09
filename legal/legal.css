@@ -1,0 +1,24 @@
+@font-face { font-family:"Figtree"; src:url("../fonts/figtree.woff") format("woff"); font-weight:400 700; font-display:swap; }
+@font-face { font-family:"Archivo"; src:url("../fonts/archivo-display.woff") format("woff"); font-weight:700 800; font-stretch:112%; font-display:swap; }
+:root { color-scheme:light dark; --bg:#F5F4F1; --surface:#fff; --ink:#1C1714; --muted:#6A615A; --line:#E4E2DD; --ember:#FF5B2E; --ember-ink:#B8400F; --crit:#D33240; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111214; --surface:#1A1C20; --ink:#F4F0EA; --muted:#ADA49B; --line:#2E3238; --ember-ink:#FF8A63; --crit:#EF4E5A; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 "Figtree",system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+main { max-width:720px; margin:0 auto; padding:24px 20px 64px; }
+h1, h2 { font-family:"Archivo","Helvetica Neue",Arial,sans-serif; font-stretch:112%; font-weight:800; letter-spacing:-.01em; line-height:1.2; }
+h1 { font-size:30px; margin:8px 0 4px; } h2 { font-size:20px; margin:32px 0 8px; } h3 { font-size:16px; margin:20px 0 4px; }
+p, li { margin:6px 0; } ul, ol { padding-left:22px; }
+a { color:var(--ember-ink); }
+.back { display:inline-flex; gap:6px; align-items:center; text-decoration:none; font-weight:600; }
+.muted { color:var(--muted); font-size:14px; }
+.box { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:16px 18px; margin:16px 0; }
+.warn { background:var(--crit); color:#fff; padding:12px 20px; font-weight:600; font-size:14px; }
+.missing { background:color-mix(in srgb, var(--crit) 18%, transparent); color:var(--crit); padding:0 4px; border-radius:4px; font-weight:600; }
+nav.legal { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:40px; padding-top:16px; border-top:1px solid var(--line); font-size:14px; }
+label { display:block; font-weight:600; margin:14px 0 6px; }
+input, select, textarea { width:100%; font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+textarea { min-height:90px; }
+button { font:inherit; font-weight:700; border:0; border-radius:14px; padding:14px 20px; background:var(--ember); color:#1C1714; width:100%; margin-top:20px; font-size:17px; cursor:pointer; }
+button:disabled { opacity:.5; }
+.ok { border-color:#1F9D5C; }
+@media print { nav, .noprint, .warn { display:none !important; } body { background:#fff; color:#000; } .box { border-color:#999; } }

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verträge hier kündigen · Repwerk Fitness</title>
+<link rel="stylesheet" href="legal.css"><link rel="icon" href="../icons/favicon.png">
+</head>
+<body>
+<main>
+<section id="form">
+<h1>Kündigung</h1>
+<form id="f" novalidate>
+<label for="contract">Vertrag</label>
+<select id="contract" name="contract"><option value="Repwerk Pro">Repwerk Pro (Monats- oder Jahresabo)</option></select>
+
+<label for="kind">Art der Kündigung</label>
+<select id="kind" name="kind"><option value="ordentlich">Ordentliche Kündigung</option><option value="ausserordentlich">Außerordentliche Kündigung aus wichtigem Grund</option></select>
+<div id="reasonWrap" hidden><label for="reason">Kündigungsgrund</label><textarea id="reason" name="reason" maxlength="1000"></textarea></div>
+
+<label for="name">Vor- und Nachname</label>
+<input id="name" name="name" autocomplete="name" maxlength="120" required>
+
+<label for="email">E-Mail-Adresse deines Kontos (für die Zuordnung und die Kündigungsbestätigung)</label>
+<input id="email" name="email" type="email" autocomplete="email" maxlength="200" required>
+
+<label for="when">Zeitpunkt</label>
+<select id="when" name="when"><option value="asap">Zum nächstmöglichen Zeitpunkt</option><option value="date">Zu einem bestimmten Datum</option></select>
+<div id="dateWrap" hidden><label for="date">Kündigung zum</label><input id="date" name="date" type="date"></div>
+
+<button type="submit" id="go">jetzt kündigen</button>
+<p id="err" role="alert" style="color:var(--crit);font-weight:600"></p>
+</form>
+</section>
+
+<section id="done" hidden>
+<h1>Kündigung eingegangen</h1>
+<div class="box ok" id="confirm"></div>
+<p id="mailnote"></p>
+<div class="noprint" style="display:flex;gap:10px;flex-wrap:wrap">
+<button type="button" id="print" style="width:auto">Drucken oder als PDF speichern</button>
+<button type="button" id="dl" style="width:auto;background:transparent;color:var(--ink);border:1px solid var(--line)">Als Datei speichern</button>
+</div>
+<p class="muted noprint" style="margin-top:24px"><a href="../">Zur App</a> · <a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a></p>
+</section>
+<p class="muted noprint" id="formfoot"><a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a></p>
+</main>
+<script src="anbieter.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); }, A = window.ANBIETER || {};
+  var auth = null; try { auth = JSON.parse(localStorage.getItem('repwerk-auth') || 'null'); } catch (e) {}
+  if (auth && auth.user && auth.user.email) $('email').value = auth.user.email;
+  $('kind').onchange = function () { $('reasonWrap').hidden = this.value !== 'ausserordentlich'; };
+  $('when').onchange = function () { $('dateWrap').hidden = this.value !== 'date'; };
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var fmt = function (iso, time) { var d = new Date(iso); return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + (time ? ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' Uhr' : ''); };
+  var lines = [];
+  $('f').onsubmit = async function (e) {
+    e.preventDefault(); $('err').textContent = '';
+    var d = { contract: $('contract').value, kind: $('kind').value, reason: $('reason').value.trim(), name: $('name').value.trim(), email: $('email').value.trim(), when: $('when').value, date: $('date').value };
+    if (d.name.length < 2) { $('err').textContent = 'Bitte gib deinen Namen an.'; return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email)) { $('err').textContent = 'Bitte gib eine gültige E-Mail-Adresse an.'; return; }
+    if (d.when === 'date' && !d.date) { $('err').textContent = 'Bitte wähle ein Datum.'; return; }
+    $('go').disabled = true;
+    var headers = { 'content-type': 'application/json' }; if (auth && auth.access_token && auth.expires_at * 1000 > Date.now()) headers.authorization = 'Bearer ' + auth.access_token;
+    var r = null, j = {};
+    try { r = await fetch('../api/cancel', { method: 'POST', headers: headers, body: JSON.stringify(d) }); j = await r.json().catch(function () { return {}; }); } catch (er) {}
+    var received = (j && j.received_at) || new Date().toISOString();
+    lines = [
+      'Kündigung – Repwerk Fitness',
+      'Eingegangen am: ' + fmt(received, true),
+      'Vertrag: ' + d.contract,
+      'Art: ' + (d.kind === 'ordentlich' ? 'Ordentliche Kündigung' : 'Außerordentliche Kündigung' + (d.reason ? ' (Grund: ' + d.reason + ')' : '')),
+      'Name: ' + d.name,
+      'E-Mail: ' + d.email,
+      'Gewünschter Zeitpunkt: ' + (d.when === 'date' ? fmt(d.date) : 'nächstmöglicher Zeitpunkt')
+    ];
+    if (j && j.ends_at) lines.push('Der Vertrag endet am: ' + fmt(j.ends_at));
+    if (j && j.reference) lines.push('Vorgangsnummer: ' + j.reference);
+    if (!r || !r.ok) lines.push('Hinweis: Unser Server hat die Kündigung nicht automatisch verarbeitet. Bitte sende diese Bestätigung zusätzlich per E-Mail an ' + (A.email || 'uns') + '.');
+    else if (j.status === 'not_found') lines.push('Wir haben zu dieser E-Mail-Adresse noch kein laufendes Abo gefunden und melden uns bei dir per E-Mail.');
+    else if (j.status === 'review') lines.push('Deine außerordentliche Kündigung prüfen wir und melden uns per E-Mail. Spätestens endet der Vertrag zum oben genannten Datum.');
+    $('confirm').innerHTML = lines.map(function (l, i) { return i ? '<p>' + esc(l) + '</p>' : '<p><b>' + esc(l) + '</b></p>'; }).join('');
+    $('mailnote').textContent = r && r.ok ? (j.mailed ? 'Eine Bestätigung haben wir dir zusätzlich per E-Mail geschickt.' : 'Speichere diese Bestätigung. Eine Bestätigung per E-Mail erhältst du unverzüglich.') : '';
+    $('form').hidden = true; $('formfoot').hidden = true; $('done').hidden = false; window.scrollTo(0, 0);
+  };
+  $('print').onclick = function () { window.print(); };
+  $('dl').onclick = function () { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/plain' })); a.download = 'kuendigung-repwerk.txt'; a.click(); };
+})();
+</script>
+</body>
+</html>

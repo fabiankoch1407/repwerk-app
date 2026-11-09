@@ -69,14 +69,26 @@ Die App zeigt dann im Pro-Fenster echte Kauf-Knöpfe statt der Demo. Nach dem Be
 
 Vor dem Live-Schalten brauchst du Impressum, Datenschutzerklärung, AGB mit Widerrufsbelehrung und Angaben zum Steuerstatus in Stripe. Hinweis: In den App-Stores ist für digitale Abos meist der Kauf über Apple bzw. Google vorgeschrieben. Stripe gilt für die Web-App.
 
+## Rechtstexte (Impressum, Datenschutz, AGB, Kündigung)
+
+Die Seiten liegen in `legal/` und sind in der App unten auf jeder Seite verlinkt (Impressum · Datenschutz · AGB · Verträge hier kündigen).
+
+1. **`legal/anbieter.js` ausfüllen:** Name, Anschrift, E-Mail, Telefon, ggf. USt-ID, Kleinunternehmer ja/nein, zuständige Datenschutz-Aufsichtsbehörde. Solange Pflichtangaben fehlen, zeigen die Seiten einen roten Entwurf-Hinweis. Du kannst die Datei direkt auf GitHub bearbeiten.
+2. **Auftragsverarbeitungsverträge** abschließen bzw. in den Konten bestätigen: Cloudflare, Supabase, Anthropic, Stripe (und dein Mail-Anbieter).
+3. **Kündigungsbestätigung per E-Mail** (Pflicht nach § 312k BGB): bei [Resend](https://resend.com) ein Konto anlegen, deine Domain bestätigen und in Cloudflare die Secrets `RESEND_API_KEY` und `MAIL_FROM` (z. B. `Repwerk <hallo@deine-domain.de>`) setzen. Ohne diese Angaben wird die Kündigung trotzdem bei Stripe ausgeführt und in der Tabelle `cancellations` gespeichert, die Bestätigungs-Mail musst du dann selbst schicken.
+4. **Kündigungen prüfen:** In Supabase unter **Table Editor → cancellations**. Einträge mit `status = review` (außerordentlich) oder `not_found` (kein Abo gefunden) bearbeitest du selbst, bei `refund_due = true` erstattest du den anteiligen Betrag in Stripe.
+5. Lass die Texte vor dem Start **anwaltlich prüfen**. Sie sind auf die App zugeschnitten, ersetzen aber keine Rechtsberatung.
+
 ## Projektaufbau
 
 | Datei / Ordner | Inhalt |
 | --- | --- |
 | `index.html` | Die fertige App (wird aus `src/` gebaut) |
 | `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync), `barcode.js` (Barcode-Scanner und Open Food Facts), `media.js` (Workout-Fotos) |
-| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` (KI mit Limits), `food.js` (Open Food Facts), `checkout.js`, `portal.js`, `stripe-webhook.js` (Pro-Abo) |
+| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` (KI mit Limits), `food.js` (Open Food Facts), `checkout.js`, `portal.js`, `stripe-webhook.js` (Pro-Abo), `cancel.js` (Kündigungsbutton) |
 | `supabase/setup.sql` | Datenbank-Einrichtung für Login und Sync |
+| `legal/` | Impressum, Datenschutz, AGB mit Widerrufsbelehrung, Kündigungsseite; Anbieterdaten in `legal/anbieter.js` |
+| `fonts/` | Selbst gehostete Schriften (Archivo, Figtree; SIL Open Font License) |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installierbarkeit und Offline-Betrieb |
 | `build.py` | Baut `index.html` und `sw.js` aus `src/` (`python3 build.py`) |
 

@@ -176,3 +176,39 @@ end;
 $$;
 revoke execute on function public.use_ai(text) from public, anon;
 grant execute on function public.use_ai(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Cancellations from the "Verträge hier kündigen" page. Written only by /api/cancel (secret key); nobody else can read them.
+create table if not exists public.cancellations (
+  reference text primary key,
+  received_at timestamptz not null,
+  user_id uuid references auth.users (id) on delete set null,
+  name text not null,
+  email text not null,
+  contract text not null,
+  kind text not null,
+  reason text not null default '',
+  requested_date timestamptz,
+  ends_at timestamptz,
+  stripe_subscriptions text not null default '',
+  status text not null,
+  refund_due boolean not null default false
+);
+alter table public.cancellations enable row level security;
+revoke all on public.cancellations from anon, authenticated;
+
+-- Consent to process health data (Art. 9 GDPR), recorded when the account is created or the AI is first used.
+create table if not exists public.consents (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  kind text not null,
+  version text not null,
+  given_at timestamptz not null default now(),
+  primary key (user_id, kind, version)
+);
+alter table public.consents enable row level security;
+drop policy if exists "consents read own" on public.consents;
+drop policy if exists "consents insert own" on public.consents;
+create policy "consents read own" on public.consents for select to authenticated using ((select auth.uid()) = user_id);
+create policy "consents insert own" on public.consents for insert to authenticated with check ((select auth.uid()) = user_id);
+revoke all on public.consents from anon;
+grant select, insert on public.consents to authenticated;

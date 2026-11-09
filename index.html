@@ -13,10 +13,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Repwerk">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,700;112,800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/figtree.woff" as="font" type="font/woff" crossorigin>
+<script src="legal/anbieter.js"></script>
 <style>
+@font-face { font-family:"Figtree"; src:url("fonts/figtree.woff") format("woff"); font-weight:400 700; font-display:swap; }
+@font-face { font-family:"Archivo"; src:url("fonts/archivo-display.woff") format("woff"); font-weight:700 800; font-stretch:112%; font-display:swap; }
 /* Layout: one phone-width column, scrolling content, fixed tab bar; sheets slide up from the bottom. */
 :root {
   --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#EFEDE8; --line:#E4E2DD;
@@ -295,6 +296,11 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 .phstrip img { width:100%; height:100%; object-fit:cover; display:block; cursor:zoom-in; }
 .phstrip .phx { position:absolute; top:6px; right:6px; width:30px; height:30px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; display:grid; place-items:center; }
 .phfull { width:100%; max-height:75vh; object-fit:contain; border-radius:var(--r-md); background:#000; }
+.lfoot { display:flex; flex-wrap:wrap; justify-content:center; gap:4px 14px; padding:18px 0 6px; font-size:12px; }
+.lfoot a { color:var(--ink-muted); text-decoration:none; } .lfoot a:hover { text-decoration:underline; }
+.consent { display:flex; gap:10px; align-items:flex-start; font-size:14px; line-height:20px; cursor:pointer; }
+.consent input { width:20px; height:20px; flex:none; margin-top:1px; accent-color:var(--ember); }
+.consent a { color:var(--ember-ink); }
 </style>
 </head>
 <body>
@@ -837,7 +843,7 @@ Object.assign(EN, { 'Fotos': 'Photos', 'Fotos bearbeiten': 'Edit photos', 'Fotos
 Object.assign(EN, {
   'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.': 'Sign in to use the AI. That keeps it fast and fair for everyone.',
   'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.': 'You’ve reached today’s limit for this AI feature. Pro gives you a lot more.',
-  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
+  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Bitte stimme zuerst der Verarbeitung deiner Gesundheitsdaten zu. Danach kannst du es noch einmal versuchen.': 'Please consent to the processing of your health data first, then try again.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
 });
 
 /* ---------- Smart coach (USP): training-aware targets, weekly check-in, load suggestions ----------
@@ -1112,7 +1118,7 @@ async function verifyCode(email, token) { setAuth(sessionFrom(await sbFetch('/au
 /* ---------- Sync: whole state as one JSON document, newest wins ---------- */
 async function cloudPull() { const rows = await sbFetch(`/rest/v1/user_state?select=data,updated_at&user_id=eq.${AUTH.user.id}`, { method: 'GET' }); return rows && rows[0] ? rows[0].data : null; }
 async function cloudPush() {
-  if (!loggedIn() || cloud.busy) { cloud.dirty = true; return; }
+  if (!loggedIn() || cloud.busy || needConsent()) { cloud.dirty = true; return; }
   cloud.busy = true; cloud.dirty = false; cloud.state = 'syncing'; paintCloud();
   try {
     await sbFetch('/rest/v1/user_state?on_conflict=user_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.user.id, data: S, updated_at: new Date(S.at || Date.now()).toISOString() }) });
@@ -1133,8 +1139,10 @@ const summaryOf = d => {
   return L(`<span translate="no">${esc(d.profile.name || 'Ohne Namen')}</span> · ${w} ${w === 1 ? 'Training' : 'Trainings'} · ${f} ${f === 1 ? 'Tag' : 'Tage'} mit Essen · geändert ${when}`, `<span translate="no">${esc(d.profile.name || 'No name')}</span> · ${w} ${w === 1 ? 'workout' : 'workouts'} · ${f} ${f === 1 ? 'day' : 'days'} with food · changed ${when}`);
 };
 /* first: true right after logging in on this device */
+let consentAsked = false;
 async function cloudSync(first) {
   if (!loggedIn() || cloud.busy) return;
+  if (needConsent()) { if (!first && !consentAsked) { consentAsked = true; consentSheet(L('Neu: Damit wir deine Daten weiter in deinem Konto sichern dürfen, brauchen wir deine ausdrückliche Einwilligung. Ohne sie bleiben neue Daten nur auf diesem Gerät.', 'New: to keep backing up your data to your account we need your explicit consent. Without it, new data stays on this device only.')).then(ok => { if (ok) cloudSync(false); }); } return; }
   if (first) setTimeout(handleInviteParam, 1200);
   cloud.state = 'syncing'; paintCloud();
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
@@ -1167,7 +1175,8 @@ function loginSheet() {
     sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">${st.step === 'email' ? L('Anmelden', 'Sign in') : L('Code eingeben', 'Enter code')}</h2><button class="iconbtn" data-close-sheet aria-label="${L('Schließen', 'Close')}">${ic('x')}</button></div>
       ${st.step === 'email' ? `<p class="muted" style="margin:0">${L('Wir schicken dir einen Code per E-Mail. Kein Passwort nötig. Neu hier? Dann legen wir dein Konto automatisch an.', 'We email you a code. No password needed. New here? We create your account automatically.')}</p>
         <label class="field"><span class="lbl">${L('E-Mail', 'Email')}</span><input class="input" id="lg-mail" type="email" inputmode="email" autocomplete="email" value="${esc(st.email)}" placeholder="name@beispiel.de"></label>
-        <button class="btn btn-p btn-block" data-lg="send" ${st.busy ? 'disabled' : ''}>${st.busy ? L('Wird gesendet …', 'Sending …') : L('Code senden', 'Send code')}</button>`
+        ${needConsent() ? consentBox('lg-consent', st.consent) : ''}
+        <button class="btn btn-p btn-block" data-lg="send" ${st.busy || (needConsent() && !st.consent) ? 'disabled' : ''}>${st.busy ? L('Wird gesendet …', 'Sending …') : L('Code senden', 'Send code')}</button>`
       : `<p class="muted" style="margin:0">${L(`Wir haben einen Code an <b>${esc(st.email)}</b> geschickt. Schau auch im Spam-Ordner nach.`, `We sent a code to <b>${esc(st.email)}</b>. Check your spam folder too.`)}</p>
         <input class="input codein" id="lg-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" aria-label="${L('Code aus der E-Mail', 'Code from the email')}">
         <button class="btn btn-p btn-block" data-lg="verify" ${st.busy ? 'disabled' : ''}>${st.busy ? L('Wird geprüft …', 'Checking …') : L('Anmelden', 'Sign in')}</button>
@@ -1178,7 +1187,7 @@ function loginSheet() {
   };
   const go = async (sh, a) => {
     if (a === 'send' || a === 'resend') {
-      if (a === 'send') st.email = (sh.querySelector('#lg-mail').value || '').trim().toLowerCase();
+      if (a === 'send') { st.email = (sh.querySelector('#lg-mail').value || '').trim().toLowerCase(); if (needConsent() && !st.consent) return; }
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(st.email)) { st.err = L('Bitte gib eine gültige E-Mail-Adresse ein.', 'Please enter a valid email address.'); draw(sh); return; }
       st.busy = true; st.err = ''; draw(sh);
       try { await sendCode(st.email); st.step = 'code'; st.sentAt = Date.now(); const t = setInterval(() => { if (!sh.isConnected || Date.now() - st.sentAt > 61000) { clearInterval(t); if (sh.isConnected) draw(sh); return; } const b = sh.querySelector('[data-lg=resend]'); if (b) { const w = Math.max(0, 60 - Math.floor((Date.now() - st.sentAt) / 1000)); b.textContent = L(`Neuer Code in ${w} s`, `New code in ${w} s`); } }, 1000); }
@@ -1189,13 +1198,14 @@ function loginSheet() {
       const code = (sh.querySelector('#lg-code').value || '').replace(/\D/g, '');
       if (code.length < 6) { st.err = L('Der Code hat mindestens 6 Ziffern.', 'The code has at least 6 digits.'); draw(sh); return; }
       st.busy = true; st.err = ''; draw(sh);
-      try { await verifyCode(st.email, code); closeSheet(); cloud.state = 'idle'; render(); await cloudSync(true); }
+      try { await verifyCode(st.email, code); closeSheet(); cloud.state = 'idle'; if (st.consent) giveConsent(); render(); await cloudSync(true); if (st.consent && needConsent()) giveConsent(); }
       catch (e) { st.busy = false; st.err = cloudErr(e) || L('Der Code stimmt nicht oder ist abgelaufen. Fordere einen neuen an.', 'The code is wrong or has expired. Request a new one.'); draw(sh); }
     }
     if (a === 'back') { st.step = 'email'; st.err = ''; draw(sh); }
   };
   openSheet('', sh => { draw(sh);
     sh.addEventListener('click', ev => { const b = ev.target.closest('[data-lg]'); if (b && !b.disabled) go(sh, b.dataset.lg); });
+    sh.addEventListener('change', ev => { if (ev.target.id === 'lg-consent') { st.consent = ev.target.checked; st.email = (sh.querySelector('#lg-mail').value || '').trim(); draw(sh); } });
     sh.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.matches('input')) { ev.preventDefault(); go(sh, st.step === 'email' ? 'send' : 'verify'); } });
   });
 }
@@ -1217,7 +1227,7 @@ function accountCardSettings() {
     <div class="row" style="gap:12px"><span class="dayic" style="--c:var(--good)">${ic('check', 20)}</span><div class="grow" style="min-width:0"><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis" translate="no">${esc(AUTH.user.email)}</div><div class="cap cloudst" data-cloudstatus>${cloudStatusText()}</div></div></div>
     <div class="grid2"><button class="btn btn-s" data-cl="sync">${L('Jetzt sichern', 'Sync now')}</button><button class="btn btn-s" data-cl="export">${L('Exportieren', 'Export')}</button></div>
     <button class="btn btn-s btn-block" data-cl="logout">${L('Abmelden', 'Sign out')}</button>
-    <button class="btn btn-g" data-cl="delete" style="color:var(--critical);align-self:flex-start">${L('Konto löschen', 'Delete account')}</button></div>`;
+    <div class="row" style="gap:4px;flex-wrap:wrap"><button class="btn btn-g" data-cl="delete" style="color:var(--critical)">${L('Konto löschen', 'Delete account')}</button><button class="btn btn-g" data-cl="withdraw" style="color:var(--ink-muted)">${L('Einwilligung widerrufen', 'Withdraw consent')}</button></div></div>`;
 }
 function accountHomeCard() {
   if (!cloudOn() || loggedIn() || S.hideAccount) return '';
@@ -1241,7 +1251,10 @@ async function signOut() {
   applyDesign(); view = 'home'; render(); toast(L('Abgemeldet', 'Signed out'));
 }
 async function deleteAccount() {
-  if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it.'), L('Konto löschen', 'Delete account'), true)) return;
+  if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst. Ein laufendes Pro-Abo kündigst du separat.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it. Cancel a running Pro subscription separately.'), L('Konto löschen', 'Delete account'), true)) return;
+  await deleteAccountNow();
+}
+async function deleteAccountNow() {
   await deleteAllCloudPhotos();
   try { await sbFetch('/rest/v1/rpc/delete_user', { method: 'POST', body: '{}' }); }
   catch (e) { toast(cloudErr(e) || L('Löschen hat nicht geklappt. Versuch es noch mal.', 'Deleting didn’t work. Try again.')); return; }
@@ -1258,6 +1271,7 @@ document.addEventListener('click', e => {
   else if (a === 'export') exportData();
   else if (a === 'logout') signOut();
   else if (a === 'delete') deleteAccount();
+  else if (a === 'withdraw') withdrawConsent();
 });
 document.addEventListener('visibilitychange', () => { if (!loggedIn()) return; if (document.visibilityState === 'hidden') { if (cloud.dirty) { clearTimeout(cloud.timer); cloudPush(); } } else cloudSync(false); });
 window.addEventListener('online', () => { if (loggedIn() && cloud.dirty) cloudPush(); });
@@ -1342,8 +1356,11 @@ async function refreshPro() {
 }
 async function buyPro(plan) {
   if (!loggedIn()) { closeSheet(); loginSheet(); toast(L('Melde dich zuerst an, damit Pro mit deinem Konto verknüpft ist', 'Sign in first so Pro is linked to your account')); return; }
+  orderSheet(plan);
+}
+async function startCheckout(plan, consent) {
   toast(L('Öffne die sichere Zahlung …', 'Opening secure checkout …'));
-  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ plan }) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(Object.assign({ plan }, consent)) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
   if (r.ok && j.url) { location.href = j.url; return; }
   if (j.code === 'already_pro') { await refreshPro(); closeSheet(); toast(L('Du hast Pro schon', 'You already have Pro')); return; }
   if (j.code === 'login') { loginSheet(); return; }
@@ -1738,6 +1755,70 @@ function editPhotosSheet(w) {
   });
 }
 
+/* ---------- Legal: links, health-data consent (Art. 9 GDPR), order summary before Stripe ----------
+   Provider details come from legal/anbieter.js (window.ANBIETER), loaded before this script in the web app.
+   Strings bilingual inline via L(de, en). */
+const CONSENT_V = '2026-11';
+const legalOn = () => !IN_CLAUDE;
+const needConsent = () => !IN_CLAUDE && !(S && S.consent && S.consent.health);
+const LEGAL = { imp: 'legal/impressum.html', ds: 'legal/datenschutz.html', agb: 'legal/agb.html', wid: 'legal/agb.html#widerruf', kd: 'legal/kuendigen.html' };
+function legalFooter() {
+  if (!legalOn()) return '';
+  return `<nav class="lfoot" aria-label="${L('Rechtliches', 'Legal')}"><a href="${LEGAL.imp}">${L('Impressum', 'Legal notice')}</a><a href="${LEGAL.ds}">${L('Datenschutz', 'Privacy')}</a><a href="${LEGAL.agb}">${L('AGB', 'Terms')}</a>${payOn() ? `<a href="${LEGAL.kd}">${L('Verträge hier kündigen', 'Cancel contracts here')}</a>` : ''}</nav>`;
+}
+function legalCardHTML() {
+  if (!legalOn()) return '';
+  const row = (href, t) => `<a class="sel" href="${href}" style="text-decoration:none;color:inherit"><div class="grow" style="font-weight:600">${t}</div>${ic('next', 18)}</a>`;
+  return `<div class="card"><div class="lbl" style="margin-bottom:4px">${L('Rechtliches', 'Legal')}</div>${row(LEGAL.imp, L('Impressum', 'Legal notice'))}${row(LEGAL.ds, L('Datenschutzerklärung', 'Privacy policy'))}${row(LEGAL.agb, L('AGB und Widerrufsbelehrung', 'Terms and right of withdrawal'))}${payOn() ? row(LEGAL.kd, L('Verträge hier kündigen', 'Cancel contracts here')) : ''}</div>`;
+}
+const consentText = () => L(`Ich bin mindestens 16 Jahre alt und willige ausdrücklich ein, dass Repwerk meine Gesundheitsdaten (zum Beispiel Gewicht, Ernährung und Training) in meinem Konto speichert und für die KI-Funktionen verarbeitet. Widerruf jederzeit unter Einstellungen → Konto. Details in der <a href="${LEGAL.ds}" target="_blank" rel="noopener">Datenschutzerklärung</a>.`, `I am at least 16 and explicitly consent to Repwerk storing my health data (such as weight, nutrition and training) in my account and processing it for the AI features. Withdraw any time under Settings → Account. Details in the <a href="${LEGAL.ds}" target="_blank" rel="noopener">privacy policy</a>.`);
+const consentBox = (id, on) => `<label class="consent"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span>${consentText()}</span></label>`;
+function giveConsent() {
+  S.consent = Object.assign({}, S.consent, { health: new Date().toISOString(), v: CONSENT_V }); save();
+  if (loggedIn()) sbFetch('/rest/v1/consents?on_conflict=user_id,kind,version', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.user.id, kind: 'health', version: CONSENT_V }) }).catch(() => {});
+}
+/* Asks for consent; resolves true if given */
+function consentSheet(reason) {
+  return new Promise(res => {
+    let done = false; const finish = v => { if (!done) { done = true; res(v); } };
+    openSheet(`<h2 class="disp">${L('Deine Einwilligung', 'Your consent')}</h2>
+      <p class="muted" style="margin:0">${reason || L('Damit wir deine Daten in deinem Konto speichern und die KI nutzen dürfen, brauchen wir deine ausdrückliche Einwilligung. Ohne sie kannst du die App weiter auf diesem Gerät nutzen.', 'To store your data in your account and use the AI, we need your explicit consent. Without it you can keep using the app on this device.')}</p>
+      ${consentBox('cs-ok')}
+      <button class="btn btn-p btn-block" data-cs="yes" disabled>${L('Einwilligen', 'I consent')}</button>
+      <button class="btn btn-g btn-block" data-cs="no">${L('Nicht jetzt', 'Not now')}</button>`, sh => {
+      const cb = sh.querySelector('#cs-ok'), yes = sh.querySelector('[data-cs=yes]');
+      cb.addEventListener('change', () => { yes.disabled = !cb.checked; });
+      sh.addEventListener('click', ev => { const b = ev.target.closest('[data-cs]'); if (!b || b.disabled) return; if (b.dataset.cs === 'yes') { giveConsent(); closeSheet(); finish(true); } else { closeSheet(); finish(false); } });
+      const obs = new MutationObserver(() => { if (!sh.isConnected) { obs.disconnect(); finish(false); } }); obs.observe(document.getElementById('overlay'), { childList: true });
+    });
+  });
+}
+async function withdrawConsent() {
+  if (!await confirmBox(L('Einwilligung widerrufen?', 'Withdraw consent?'), L('Ohne Einwilligung dürfen wir keine Gesundheitsdaten in deinem Konto speichern. Dein Konto und alle Cloud-Daten werden deshalb gelöscht. Exportiere vorher deine Daten, wenn du sie behalten willst. Ein laufendes Abo kündigst du separat.', 'Without consent we may not store health data in your account, so your account and all cloud data will be deleted. Export your data first if you want to keep it. Cancel a running subscription separately.'), L('Widerrufen und löschen', 'Withdraw and delete'), true)) return;
+  await deleteAccountNow();
+}
+/* Order summary: shown before redirecting to Stripe */
+function orderSheet(plan) {
+  const A = window.ANBIETER || {}, year = plan === 'year', trial = SRV.trialDays || 0;
+  const price = year ? L('59,99 € pro Jahr', '€59.99 per year') : L('8,99 € pro Monat', '€8.99 per month');
+  const tax = A.kleinunternehmer === false ? L('inkl. gesetzlicher Umsatzsteuer', 'incl. VAT') : L('gemäß § 19 UStG ohne Umsatzsteuer', 'no VAT charged (small business, § 19 UStG)');
+  const term = year ? L('Erste Laufzeit 12 Monate. Danach läuft das Abo auf unbestimmte Zeit weiter und ist jederzeit mit einer Frist von einem Monat kündbar.', 'First term 12 months. After that it continues indefinitely and can be cancelled at any time with one month’s notice.') : L('Läuft monatlich und ist jederzeit zum Ende des laufenden Monats kündbar.', 'Runs monthly and can be cancelled at any time to the end of the current month.');
+  openSheet(`<div class="row" style="justify-content:space-between"><h2 class="disp">${L('Bestellübersicht', 'Order summary')}</h2><button class="iconbtn" data-close-sheet aria-label="${L('Schließen', 'Close')}">${ic('x')}</button></div>
+    <div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row" style="justify-content:space-between"><b>Repwerk Pro · ${year ? L('Jährlich', 'Yearly') : L('Monatlich', 'Monthly')}</b><b>${price}</b></div>
+      <div class="cap">${tax}</div>
+      ${trial ? `<div class="cap">${L(`Die ersten ${trial} Tage sind kostenlos. Kündigst du vorher, zahlst du nichts. Danach wird der Preis automatisch abgebucht.`, `The first ${trial} days are free. Cancel before then and you pay nothing. After that the price is charged automatically.`)}</div>` : ''}
+      <div class="cap">${term}</div>
+      <div class="cap">${L('Zahlung im Voraus über Stripe. Kündigen über „Verträge hier kündigen“ oder Einstellungen → Abo.', 'Paid in advance via Stripe. Cancel via “Cancel contracts here” or Settings → Subscription.')}</div></div>
+    <label class="consent"><input type="checkbox" id="os-agb"><span>${L(`Ich akzeptiere die <a href="${LEGAL.agb}" target="_blank" rel="noopener">AGB</a> und habe die <a href="${LEGAL.wid}" target="_blank" rel="noopener">Widerrufsbelehrung</a> zur Kenntnis genommen.`, `I accept the <a href="${LEGAL.agb}" target="_blank" rel="noopener">terms</a> and have read the <a href="${LEGAL.wid}" target="_blank" rel="noopener">right of withdrawal</a>.`)}</span></label>
+    <label class="consent"><input type="checkbox" id="os-early"><span>${L('Ich verlange ausdrücklich, dass Repwerk Pro sofort beginnt, also vor Ablauf der 14-tägigen Widerrufsfrist. Mir ist bekannt, dass ich bei einem Widerruf für die bis dahin genutzte Zeit einen anteiligen Betrag zahle.', 'I expressly request that Repwerk Pro starts immediately, before the 14-day withdrawal period ends. I understand that if I withdraw, I pay a pro-rata amount for the time used until then.')}</span></label>
+    <button class="btn btn-p btn-block" data-os="go" disabled>${L('Weiter zur Zahlung', 'Continue to payment')}</button>
+    <p class="cap" style="margin:0;text-align:center">${L('Den Vertrag schließt du auf der nächsten Seite bei Stripe ab.', 'You conclude the contract on the next page at Stripe.')}</p>`, sh => {
+    const a = sh.querySelector('#os-agb'), e = sh.querySelector('#os-early'), go = sh.querySelector('[data-os=go]');
+    const upd = () => { go.disabled = !(a.checked && e.checked); }; a.addEventListener('change', upd); e.addEventListener('change', upd);
+    go.addEventListener('click', () => { if (!go.disabled) { go.disabled = true; startCheckout(plan, { terms: true, earlyStart: new Date().toISOString() }); } });
+  });
+}
+
 /* Repwerk Fitness prototype v2 */
 const I = {
   home:'<path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/>',
@@ -1810,6 +1891,7 @@ const aiOffText = () => IN_CLAUDE ? 'Die KI funktioniert, wenn du den Prototyp i
 function apiError(code) { const e = new Error(code); e.code = code; return e; }
 async function apiCall(body) {
   if (SRV.aiLogin && !loggedIn()) throw apiError('login');
+  if (needConsent()) { setTimeout(() => consentSheet(), 120); throw apiError('consent'); }
   let r;
   try { r = await fetch('api/ai', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
   const j = await r.json().catch(() => ({}));
@@ -1913,7 +1995,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appl
 /* ---------- Claude ---------- */
 let sampleFn = null, sampleImages = false;
 async function connectSample() { try { sampleFn = await claude.use('sample'); if (sampleFn) { const l = await sampleFn.limits().catch(() => null); sampleImages = !!(l && l.images); } } catch (e) { sampleFn = null; } render(); }
-const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
+const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.', consent: 'Bitte stimme zuerst der Verarbeitung deiner Gesundheitsdaten zu. Danach kannst du es noch einmal versuchen.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
 const ALLERGENS = { laktose: 'Laktose', gluten: 'Gluten', nuesse: 'Nüsse', ei: 'Ei', fisch: 'Fisch', soja: 'Soja' };
 const DIETS = { alles: 'Alles', vegetarisch: 'Vegetarisch', vegan: 'Vegan', pescetarisch: 'Pescetarisch' };
 function foodPrompt() {
@@ -2151,7 +2233,7 @@ function render() {
   syncCommunity();
   if (!S.profile) { renderOnboarding(); return; }
   const fn = { nutrition: vNutrition, mealplan: vMealPlan, calendar: vCalendar, stats: vStats, home: vHome, food: vFood, train: vTrain, community: vCommunity, profile: vProfile, settings: vSettings, workout: vWorkout, library: vLibrary, routine: vRoutine }[view] || vHome;
-  $('#app').innerHTML = `<div class="screen">${fn()}</div>`;
+  $('#app').innerHTML = `<div class="screen">${fn()}${view === 'workout' || view === 'routine' ? '' : legalFooter()}</div>`;
   $('#app').onclick = onClick; $('#app').onchange = onChange; $('#app').oninput = onInput;
   renderTabs();
 }
@@ -2680,6 +2762,7 @@ function vSettings() {
       <li>Fotos gehen nur zur Analyse an die KI, wenn du sie auswählst, und werden dafür nicht gespeichert.</li>
       <li>Deine Ernährungs-, Trainings- und Körperdaten sind privat. In der Community sichtbar ist nur, was du selbst teilst: Profil und geteilte Workouts.</li>
       <li>Die Werbebanner sind Platzhalter. In der App gibt es personalisierte Werbung nur mit deiner Einwilligung.</li></ul></div>
+    ${legalCardHTML()}
     <button class="btn btn-d btn-block" data-act="reset">Alle Daten löschen</button>`;
 }
 

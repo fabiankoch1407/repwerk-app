@@ -240,5 +240,5 @@ Object.assign(EN, { 'Fotos': 'Photos', 'Fotos bearbeiten': 'Edit photos', 'Fotos
 Object.assign(EN, {
   'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.': 'Sign in to use the AI. That keeps it fast and fair for everyone.',
   'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.': 'You’ve reached today’s limit for this AI feature. Pro gives you a lot more.',
-  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
+  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Bitte stimme zuerst der Verarbeitung deiner Gesundheitsdaten zu. Danach kannst du es noch einmal versuchen.': 'Please consent to the processing of your health data first, then try again.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
 });
