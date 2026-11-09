@@ -33,14 +33,17 @@ function cycleDelta() {
   return { up: Math.round(up / 10) * 10, down: Math.round(down / 10) * 10 };
 }
 function dayTargets(k = dayKey()) {
-  const b = baseTargets(), type = dayType(k), cd = cycleDelta(), delta = type === 'rest' ? -cd.down : cd.up;
+  const b = baseTargets(), type = dayType(k), cd = cycleDelta();
+  const burned = sm().addBurn && typeof kcalBurnedOn === 'function' ? kcalBurnedOn(k) : 0;
+  const delta = burned ? Math.round(burned / 10) * 10 : type === 'rest' ? -cd.down : cd.up;
   if (!delta) return { ...b, type, delta: 0 };
+  if (burned) return { ...b, kcal: b.kcal + delta, c: Math.round(b.c + delta / 4), water: b.water + 500, type: 'train', delta, burned: true };
   return { ...b, kcal: b.kcal + delta, c: Math.max(0, Math.round(b.c + delta / 4)), water: b.water + (type === 'rest' ? 0 : 500), type, delta };
 }
 function dayTypeChip(g) {
-  if (!sm().cycle || !g.delta) return '';
+  if ((!sm().cycle && !g.burned) || !g.delta) return '';
   const tr = g.type !== 'rest';
-  return `<button class="daychip ${tr ? 'tr' : ''}" data-sm="cycleinfo">${ic(tr ? 'db' : 'spark', 16)}<span>${tr ? L('Trainingstag', 'Training day') : L('Ruhetag', 'Rest day')} · ${sgn(g.delta)} kcal ${L('Kohlenhydrate', 'carbs')}</span>${ic('info', 14)}</button>`;
+  return `<button class="daychip ${tr ? 'tr' : ''}" data-sm="cycleinfo">${ic(tr ? 'db' : 'spark', 16)}<span>${g.burned ? `${L('Training verbrannt', 'Workout burned')} · ${sgn(g.delta)} kcal` : `${tr ? L('Trainingstag', 'Training day') : L('Ruhetag', 'Rest day')} · ${sgn(g.delta)} kcal ${L('Kohlenhydrate', 'carbs')}`}</span>${ic('info', 14)}</button>`;
 }
 function cycleInfo() {
   const b = baseTargets(), cd = cycleDelta(), wd = trainWeekdays(), names = WD_SHORT();

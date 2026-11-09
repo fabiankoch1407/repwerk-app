@@ -301,6 +301,12 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 .consent { display:flex; gap:10px; align-items:flex-start; font-size:14px; line-height:20px; cursor:pointer; }
 .consent input { width:20px; height:20px; flex:none; margin-top:1px; accent-color:var(--ember); }
 .consent a { color:var(--ember-ink); }
+.hrbar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:var(--r-lg); background:var(--surface); border:1px solid var(--line); flex-shrink:0; }
+.hrbar .hrheart { color:var(--ink-muted); display:grid; place-items:center; }
+.hrbar.live { border-color:var(--zc, var(--critical)); }
+.hrbar.live .hrheart { color:var(--critical); animation:hrbeat 1s ease-in-out infinite; }
+@keyframes hrbeat { 0%,100% { transform:scale(1); } 15% { transform:scale(1.18); } 30% { transform:scale(1); } }
+@media (prefers-reduced-motion: reduce) { .hrbar.live .hrheart { animation:none; } }
 </style>
 </head>
 <body>

@@ -247,3 +247,5 @@ Object.assign(EN, { 'Fertige Produkte': 'Ready-made products', 'Alles selbst gem
   'Zum Beispiel Skyr, Hüttenkäse, Proteinpudding, Wraps oder Fertigsalate aus dem Supermarkt. Spart Zeit, steht mit auf der Einkaufsliste.': 'For example skyr, cottage cheese, protein pudding, wraps or ready salads from the supermarket. Saves time and goes on the shopping list.',
   'Fertigprodukt': 'Ready-made', 'Fertigprodukt · ohne Kochen': 'Ready-made · no cooking', 'viele Fertigprodukte': 'lots of ready-made products', 'alles selbst gemacht': 'all home-made', 'Einkaufen': 'To buy', 'So geht’s': 'How to', 'ohne Meal Prep': 'without meal prep' });
 RULES.push([new RegExp('^(Einkaufen|Zutaten) für (\\d+) (Portion|Portionen)$'), (m, a, n) => `${a === 'Einkaufen' ? 'To buy' : 'Ingredients'} for ${n} ${n === '1' ? 'serving' : 'servings'}`]);
+/* Heart rate and calories (v12) */
+RULES.push([new RegExp('^([\\d.,]+) kcal verbrannt$'), '$1 kcal burned']);
