@@ -279,6 +279,16 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 .chips.wdpick { flex-wrap:nowrap; gap:6px; } .wdpick .chip { flex:1; min-width:0; padding:7px 0; text-align:center; }
 .codein { font-size:26px; letter-spacing:6px; text-align:center; font-weight:800; font-variant-numeric:tabular-nums; }
 .cloudst.bad, [data-cloudstatus].bad { color:var(--warning); }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; } .grid3 .btn { padding:0 6px; gap:6px; font-size:15px; }
+.scanbox { position:relative; width:100%; aspect-ratio:4/3; border-radius:var(--r-lg); overflow:hidden; background:#000; flex-shrink:0; }
+.scanbox video { width:100%; height:100%; object-fit:cover; display:block; }
+.scanbox.off { aspect-ratio:auto; height:0; }
+.scanguide { position:absolute; left:7%; right:7%; top:25%; bottom:25%; border:3px solid rgba(255,255,255,.9); border-radius:14px; box-shadow:0 0 0 999px rgba(0,0,0,.35); }
+.scanguide i { position:absolute; left:6%; right:6%; top:50%; height:2px; background:var(--ember); box-shadow:0 0 8px var(--ember); animation:scanl 1.6s ease-in-out infinite; }
+@keyframes scanl { 0%,100% { transform:translateY(-28px); } 50% { transform:translateY(28px); } }
+@media (prefers-reduced-motion: reduce) { .scanguide i { animation:none; } }
+.torchb { position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.55); color:#fff; }
+.torchb.on { background:var(--ember); color:var(--on-ember); }
 </style>
 </head>
 <body>

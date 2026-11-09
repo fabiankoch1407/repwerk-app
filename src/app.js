@@ -37,7 +37,9 @@ const I = {
   flame:'<path d="M12 3c1 3.5 5 5.5 5 10.5a5 5 0 0 1-10 0c0-2.2 1-3.6 2.2-4.8.3 1.6 1.1 2.6 2.3 3C11 9 11.2 6 12 3z"/>',
   stats:'<path d="M5 20V11M10 20V5M15 20v-7M20 20V9"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
-  refresh:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>'
+  refresh:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
+  barcode:'<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10.5 8v8M14 8v8M17 8v8"/>',
+  torch:'<path d="M8 3h8l-1 5H9L8 3ZM9 8v12a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V8M12 12v3"/>'
 };
 const ic = (n, s = 22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 const MARK = (s, c) => `<svg width="${s}" height="${s}" viewBox="0 0 64 64" fill="${c || 'currentColor'}" aria-hidden="true"><rect x="3" y="22" width="7" height="20" rx="3"/><rect x="12" y="13" width="9" height="38" rx="3.5"/><rect x="20" y="28.5" width="24" height="7" rx="2"/><rect x="43" y="13" width="9" height="38" rx="3.5"/><rect x="54" y="22" width="7" height="20" rx="3"/></svg>`;
@@ -430,12 +432,12 @@ function vFood() {
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${macroRow('Protein','p-bg',t.p,g.p)}${macroRow('Kohlenhydrate','c-bg',t.c,g.c)}${macroRow('Fett','f-bg',t.f,g.f)}</div>
     <div class="row" style="margin-top:12px;gap:8px"><span style="color:var(--protein)">${ic('drop', 18)}</span><span class="grow cap">Wasser ${fmt1((d.water || 0) / 1000)} von ${fmt1(g.water / 1000)} l</span><button class="btn btn-g" data-act="water">+ 250 ml</button></div>
     <button class="btn btn-s btn-block" data-act="daynut" style="margin-top:10px;height:42px">${ic('stats', 18)} Nährwerte</button></div>
-    <div class="grid2"><button class="btn btn-p" data-act="photo">${ic('cam', 20)} Scannen</button><button class="btn btn-s" data-act="search">${ic('search', 20)} Suchen</button></div>
+    <div class="grid3"><button class="btn btn-p" data-act="photo">${ic('cam', 20)} Scannen</button><button class="btn btn-p" data-act="barcode">${ic('barcode', 20)} Barcode</button><button class="btn btn-s" data-act="search">${ic('search', 20)} Suchen</button></div>
     <div class="row" style="justify-content:space-between"><button class="btn btn-g" data-act="textfood">${ic('text', 18)} Beschreiben</button><span class="cap">KI-Scans heute: ${used} von ${lim().photo}</span></div>
     <button class="card row" data-act="mealplan" style="text-align:left"><div class="thumb ember">${ic('book')}</div><div class="grow"><div class="row" style="gap:8px"><span style="font-weight:700">KI-Ernährungsplan</span>${S.pro ? '' : '<span class="tag ember">Pro</span>'}</div><div class="cap">${S.mealPlan && S.mealPlan.v === 2 ? (() => { const td = S.mealPlan.days.find(x => x.key === dayKey()); return td ? `Heute: ${td.meals.map(m => (mpRecipe(m.recipe) || {}).name).filter(Boolean).slice(0, 2).join(', ')}${td.meals.length > 2 ? ' …' : ''}` : `Plan vom ${new Date(S.mealPlan.at).toLocaleDateString(LOC(), { day: 'numeric', month: 'short' })} ist abgelaufen. Erstelle einen neuen.`; })() : 'Wochenplan mit Rezepten, Meal Prep und Einkaufsliste für einen Einkauf'}</div></div>${ic('next', 18)}</button>
     ${SLOTS.map(([k, label], i) => { const items = d.meals[k] || []; const kc = items.reduce((a, e) => a + e.kcal, 0);
       return `<div class="card"><div class="row" style="justify-content:space-between"><h2 class="disp" style="font-size:18px;line-height:24px">${label}</h2><div class="row" style="gap:8px"><span class="num muted">${fmt(kc)} kcal</span><button class="iconbtn" style="width:36px;height:36px;background:var(--ember);color:var(--on-ember)" data-addslot="${k}" aria-label="${label} eintragen">${ic('plus', 20)}</button></div></div>
-      ${items.length ? `<ul class="list" style="margin-top:4px">${items.map(e => `<li><div class="grow" data-entry="${k}:${e.id}" style="cursor:pointer"><div style="font-weight:600">${esc(e.name)}</div><div class="cap">${fmt(e.grams)} g · ${fmt(e.p)} P · ${fmt(e.c)} K · ${fmt(e.f)} F${e.src === 'foto' ? ' · KI-Scan' : e.src === 'text' ? ' · KI-Text' : e.src === 'plan' ? ' · Plan' : ''}</div></div><span class="num" style="font-weight:700">${fmt(e.kcal)}</span><button class="iconbtn" style="width:36px;height:36px" data-del="${k}:${e.id}" aria-label="${esc(e.name)} löschen">${ic('trash', 18)}</button></li>`).join('')}</ul>` : `<div class="cap" style="margin-top:6px">Noch nichts eingetragen.</div>`}</div>${i === 1 ? adBanner() : ''}`; }).join('')}`;
+      ${items.length ? `<ul class="list" style="margin-top:4px">${items.map(e => `<li><div class="grow" data-entry="${k}:${e.id}" style="cursor:pointer"><div style="font-weight:600">${esc(e.name)}</div><div class="cap">${fmt(e.grams)} g · ${fmt(e.p)} P · ${fmt(e.c)} K · ${fmt(e.f)} F${e.src === 'foto' ? ' · KI-Scan' : e.src === 'text' ? ' · KI-Text' : e.src === 'plan' ? ' · Plan' : e.src === 'barcode' ? ' · Barcode' : ''}</div></div><span class="num" style="font-weight:700">${fmt(e.kcal)}</span><button class="iconbtn" style="width:36px;height:36px" data-del="${k}:${e.id}" aria-label="${esc(e.name)} löschen">${ic('trash', 18)}</button></li>`).join('')}</ul>` : `<div class="cap" style="margin-top:6px">Noch nichts eingetragen.</div>`}</div>${i === 1 ? adBanner() : ''}`; }).join('')}`;
 }
 
 /* ---------- Training (Hevy-style) ---------- */
@@ -1127,13 +1129,15 @@ async function onClick(e) {
   switch (d.act) {
     case 'plus': openSheet(`<h2 class="disp">Hinzufügen</h2><div style="display:flex;flex-direction:column;gap:10px">
       <button class="btn btn-p btn-block" data-q="photo">${ic('cam', 20)} Essen oder Wasser scannen</button>
+      <button class="btn btn-s btn-block" data-q="barcode">${ic('barcode', 20)} Barcode scannen</button>
       <button class="btn btn-s btn-block" data-q="textfood">${ic('text', 20)} Mahlzeit beschreiben</button>
       <button class="btn btn-s btn-block" data-q="search">${ic('search', 20)} Lebensmittel suchen</button>
       <button class="btn btn-s btn-block" data-q="water">${ic('drop', 20)} 250 ml Wasser</button>
       <button class="btn btn-s btn-block" data-q="start">${ic('db', 20)} ${S.active ? 'Training fortsetzen' : 'Training starten'}</button>
       <button class="btn btn-s btn-block" data-q="weight">${ic('chart', 20)} Gewicht eintragen</button></div>`, sh => sh.addEventListener('click', ev => { const q = ev.target.closest('[data-q]'); if (!q) return; closeSheet(); const k = q.dataset.q; pendingSlot = null;
-        if (k === 'photo') photoFlow(); else if (k === 'textfood') textFlow(); else if (k === 'search') searchSheet(); else if (k === 'water') { addWater(250); } else if (k === 'start') { S.active ? (view = 'workout', render()) : startWorkout(nextRoutine().id); } else { view = 'profile'; render(); setTimeout(() => { const i = $('#w-in'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } }, 60); } })); break;
+        if (k === 'photo') photoFlow(); else if (k === 'barcode') barcodeSheet(); else if (k === 'textfood') textFlow(); else if (k === 'search') searchSheet(); else if (k === 'water') { addWater(250); } else if (k === 'start') { S.active ? (view = 'workout', render()) : startWorkout(nextRoutine().id); } else { view = 'profile'; render(); setTimeout(() => { const i = $('#w-in'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } }, 60); } })); break;
     case 'photo': pendingSlot = null; photoFlow(); break;
+    case 'barcode': pendingSlot = null; barcodeSheet(); break;
     case 'textfood': pendingSlot = null; textFlow(); break;
     case 'search': pendingSlot = null; searchSheet(); break;
     case 'water': addWater(250); break;
@@ -1295,12 +1299,12 @@ function slotSheet(slot) {
   const label = SLOTS.find(s => s[0] === slot)[1], rec = recentFor(slot);
   pendingSlot = slot;
   openSheet(`<div class="row" style="justify-content:space-between"><h2 class="disp">${label} eintragen</h2><button class="iconbtn" data-close-sheet aria-label="Schließen">${ic('x')}</button></div>
-    <div class="grid2"><button class="btn btn-p" data-sq="photo">${ic('cam', 20)} Scannen</button><button class="btn btn-s" data-sq="search">${ic('search', 20)} Suchen</button></div>
-    <button class="btn btn-s btn-block" data-sq="text">${ic('text', 20)} Beschreiben</button>
+    <div class="grid2"><button class="btn btn-p" data-sq="photo">${ic('cam', 20)} Scannen</button><button class="btn btn-p" data-sq="barcode">${ic('barcode', 20)} Barcode</button></div>
+    <div class="grid2"><button class="btn btn-s" data-sq="search">${ic('search', 20)} Suchen</button><button class="btn btn-s" data-sq="text">${ic('text', 20)} Beschreiben</button></div>
     ${rec.length ? `<div class="lbl">Zuletzt gegessen</div><div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${rec.map((e, i) => `<li><div class="grow"><div style="font-weight:600">${esc(e.name)}</div><div class="cap">${fmt(e.grams)} g · ${fmt(e.kcal)} kcal · ${fmt(e.p)} P</div></div><button class="iconbtn" style="width:38px;height:38px" data-rq="${i}" aria-label="${esc(e.name)} hinzufügen">${ic('plus', 20)}</button></li>`).join('')}</ul></div>` : `<p class="cap" style="margin:0">Was du hier einträgst, landet direkt bei ${label}. Häufige Mahlzeiten erscheinen danach hier zum schnellen Eintragen.</p>`}`,
     sh => sh.addEventListener('click', ev => {
       const q = ev.target.closest('[data-sq]');
-      if (q) { closeSheet(); pendingSlot = slot; if (q.dataset.sq === 'photo') photoFlow(); else if (q.dataset.sq === 'search') searchSheet(); else textFlow(); return; }
+      if (q) { closeSheet(); pendingSlot = slot; if (q.dataset.sq === 'photo') photoFlow(); else if (q.dataset.sq === 'barcode') barcodeSheet(); else if (q.dataset.sq === 'search') searchSheet(); else textFlow(); return; }
       const r = ev.target.closest('[data-rq]');
       if (r) { const e = rec[+r.dataset.rq]; foodDay().meals[slot].push({ id: uid(), name: e.name, grams: e.grams, kcal: e.kcal, p: e.p, c: e.c, f: e.f, ...extras(e), src: e.src === 'plan' ? 'plan' : 'db' }); save(); render(); r.disabled = true; r.innerHTML = ic('check', 20); r.style.color = 'var(--good)'; toast(`${e.name} bei ${label} eingetragen`); }
     }));
@@ -1346,7 +1350,7 @@ function resultSheet(m) {
     sh.innerHTML = `<div class="grab"></div>${m.url ? `<img class="photo" src="${m.url}" alt="Dein Foto" style="max-height:180px">` : ''}
       <div class="row" style="justify-content:space-between;align-items:baseline"><h2 class="disp">${esc(m.title)}</h2>${m.items.length ? `<span class="disp num" style="font-size:22px">${fmt(t.kcal)} <span class="cap">kcal</span></span>` : ''}</div>
       ${m.items.length ? `<div class="cap" style="margin-top:-8px"><span class="dot p-bg"></span> ${fmt(t.p)} g Protein · <span class="dot c-bg"></span> ${fmt(t.c)} g KH · <span class="dot f-bg"></span> ${fmt(t.f)} g Fett</div>
-      <p class="muted" style="margin:0">Mengen sind geschätzt, tippe auf die Zahl zum Ändern.</p>` : ''}
+      <p class="muted" style="margin:0">${m.exact ? 'Tippe auf die Menge, um deine Portion einzustellen.' : 'Mengen sind geschätzt, tippe auf die Zahl zum Ändern.'}</p>` : ''}
       ${m.note ? `<div class="banner">${esc(m.note)}</div>` : ''}
       ${m.water.map((w, n) => `<div class="water-row"><span style="color:var(--protein)">${ic('drop', 20)}</span><div class="grow"><div style="font-weight:600">${esc(w.name)}</div><div class="cap">wird zu Wasser hinzugefügt</div></div><span class="unit" style="width:104px;flex:none"><input class="input" style="height:42px;font-size:16px;font-weight:700;padding-right:34px" inputmode="numeric" value="${w.ml}" data-ml="${n}" aria-label="Menge ${esc(w.name)} in ml"><span style="top:10px;right:10px">ml</span></span><button class="iconbtn" style="width:34px;height:34px" data-rmw="${n}" aria-label="${esc(w.name)} entfernen">${ic('x', 16)}</button></div>`).join('')}
       ${m.items.length ? `<div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${m.items.map((i, n) => `<li><div class="grow"><div style="font-weight:600">${esc(i.name)}</div><div class="cap">${fmt(i.kcal)} kcal · ${fmt1(i.p)} P · ${fmt1(i.c)} K · ${fmt1(i.f)} F</div><div class="chips" style="margin-top:4px;gap:6px">${i.conf !== undefined ? `<span class="tag"><span class="dot" style="background:var(${i.conf >= 0.7 ? '--good' : '--warning'})"></span>${i.conf >= 0.7 ? 'sicher' : 'unsicher'}</span>` : ''}${i.allergen ? `<span class="tag" style="color:var(--critical)">enthält ${esc(i.allergen)}?</span>` : ''}</div></div><span class="unit" style="width:96px;flex:none"><input class="input" style="height:42px;font-size:16px;font-weight:700;padding-right:30px" inputmode="numeric" value="${r0(i.grams)}" data-g="${n}" aria-label="Menge ${esc(i.name)} in Gramm"><span style="top:10px;right:10px">g</span></span><button class="iconbtn" style="width:34px;height:34px" data-rm="${n}" aria-label="${esc(i.name)} entfernen">${ic('x', 16)}</button></li>`).join('')}</ul></div>` : ''}
@@ -1372,17 +1376,32 @@ function resultSheet(m) {
   });
 }
 function searchSheet(onPick) {
-  let q = '';
+  let q = '', online = [], onlineQ = '', onlineState = '';
   const WATER = { id: 'water', name: 'Wasser', water: true, ml: 250 };
-  const items = () => { const l = FOODS.filter(f => !q || f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 40); return (!q || 'wasser mineralwasser'.includes(q.toLowerCase())) ? [WATER, ...l] : l; };
-  openSheet(`<h2 class="disp">Lebensmittel suchen</h2><input class="input" id="fs" placeholder="z. B. Skyr, Reis, Wasser" aria-label="Lebensmittel suchen"><div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list" id="fl"></ul></div><p class="cap" style="margin:0">Werte pro 100 g aus einer kleinen Beispielliste. Die App nutzt Open Food Facts und Barcode-Scan.</p>`, sh => {
-    const list = sh.querySelector('#fl'), inp = sh.querySelector('#fs');
-    const draw = () => { const it = items(); list.innerHTML = it.length ? it.map(f => f.water ? `<li data-f="water" style="cursor:pointer"><span style="color:var(--protein)">${ic('drop', 20)}</span><div class="grow"><div style="font-weight:600">Wasser</div><div class="cap">zählt zu deinem Wasserziel</div></div><span class="btn btn-s btn-sm">250 ml</span></li>` : `<li data-f="${f.id}" style="cursor:pointer"><div class="grow"><div style="font-weight:600">${esc(f.name)}</div><div class="cap">pro 100 g: ${f.kcal} kcal · ${fmt1(f.p)} P · ${fmt1(f.c)} K · ${fmt1(f.f)} F</div></div><span class="btn btn-s btn-sm">${f.portion} g</span></li>`).join('') : '<li class="empty" style="justify-content:center">Nichts gefunden. Beschreib es stattdessen der KI.</li>'; };
+  const match = f => !q || foodLabel(f).toLowerCase().includes(q.toLowerCase());
+  const items = () => { const mine = myFoodList().filter(match).slice(0, q ? 20 : 8), l = FOODS.filter(match).slice(0, 40); return (!q || 'wasser mineralwasser water'.includes(q.toLowerCase())) ? [WATER, ...mine, ...l] : [...mine, ...l]; };
+  const row = (f, key) => f.water ? `<li data-f="water" style="cursor:pointer"><span style="color:var(--protein)">${ic('drop', 20)}</span><div class="grow"><div style="font-weight:600">Wasser</div><div class="cap">zählt zu deinem Wasserziel</div></div><span class="btn btn-s btn-sm">250 ml</span></li>`
+    : `<li data-f="${key || f.id}" style="cursor:pointer"><div class="grow" style="min-width:0"><div style="font-weight:600"${f.src ? ' translate="no"' : ''}>${esc(f.name)}</div><div class="cap">${f.brand ? `<span translate="no">${esc(f.brand)}</span> · ` : ''}pro 100 ${f.unit === 'ml' ? 'ml' : 'g'}: ${fmt(f.kcal)} kcal · ${fmt1(f.p)} P · ${fmt1(f.c)} K · ${fmt1(f.f)} F</div></div><span class="btn btn-s btn-sm">${f.portion} ${f.unit === 'ml' ? 'ml' : 'g'}</span></li>`;
+  openSheet(`<h2 class="disp">Lebensmittel suchen</h2><div class="row" style="gap:8px"><input class="input grow" id="fs" placeholder="z. B. Skyr, Reis, Wasser" aria-label="Lebensmittel suchen"><button class="iconbtn" data-bcs aria-label="Barcode scannen" style="background:var(--ember);color:var(--on-ember)">${ic('barcode', 22)}</button></div><div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list" id="fl"></ul></div><div id="fon"></div><button class="btn btn-g" data-own style="align-self:flex-start">+ Eigenes Lebensmittel anlegen</button><p class="cap" style="margin:0">Produktdaten von Open Food Facts (ODbL), Grundnahrungsmittel aus unserer Liste.</p>`, sh => {
+    const list = sh.querySelector('#fl'), inp = sh.querySelector('#fs'), on = sh.querySelector('#fon');
+    const drawOnline = () => { on.innerHTML = q.length < 3 ? '' : onlineState === 'busy' && onlineQ === q ? `<div class="row" style="gap:10px;padding:4px 2px"><div class="spinner" aria-hidden="true" style="width:20px;height:20px"></div><span class="cap">Suche in Open Food Facts …</span></div>`
+      : onlineQ === q && onlineState === 'done' ? (online.length ? `<div class="lbl" style="margin-bottom:6px">Markenprodukte</div><div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${online.map((f, i) => row(f, 'on:' + i)).join('')}</ul></div>` : `<div class="cap">Keine Markenprodukte zu „${esc(q)}“ gefunden.</div>`)
+      : onlineQ === q && onlineState === 'error' ? `<div class="cap">Die Online-Suche ist gerade nicht erreichbar.</div>`
+      : `<button class="btn btn-s btn-block" data-online>${ic('search', 18)} „${esc(q)}“ in Markenprodukten suchen</button>`; };
+    const draw = () => { const it = items(); list.innerHTML = it.length ? it.map(f => row(f)).join('') : '<li class="empty" style="justify-content:center">Nichts in der Grundliste gefunden.</li>'; drawOnline(); };
+    const runOnline = async () => { const qq = q; onlineQ = qq; onlineState = 'busy'; drawOnline(); try { const r = await offSearch(qq); if (onlineQ !== qq) return; online = r; onlineState = 'done'; } catch (e) { if (onlineQ !== qq) return; onlineState = 'error'; } drawOnline(); };
     draw(); inp.focus(); inp.addEventListener('input', () => { q = inp.value.trim(); draw(); });
-    list.addEventListener('click', ev => { const li = ev.target.closest('[data-f]'); if (!li) return;
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter' && q.length >= 3) { ev.preventDefault(); runOnline(); } });
+    sh.addEventListener('click', ev => {
+      if (ev.target.closest('[data-bcs]')) { barcodeSheet(onPick); return; }
+      if (ev.target.closest('[data-own]')) { ownFoodSheet({ name: q }, onPick); return; }
+      if (ev.target.closest('[data-online]')) { runOnline(); return; }
+      const li = ev.target.closest('[data-f]'); if (!li) return;
       if (li.dataset.f === 'water') { if (onPick) onPick({ ...WATER }); else { closeSheet(); addWater(250); } return; }
-      const f = FOODS.find(x => x.id === li.dataset.f), k = f.portion / 100;
-      const it = { id: uid(), name: f.name, grams: f.portion, kcal: f.kcal * k, p: f.p * k, c: f.c * k, f: f.f * k, src: 'db' }; for (const x of XN) if (f[x] !== undefined) it[x] = f[x] * k; it.base = { g: f.portion, kcal: it.kcal, p: it.p, c: it.c, f: it.f }; for (const x of XN) it.base[x] = it[x];
+      const id = li.dataset.f;
+      if (id.startsWith('on:')) { pickFood(online[+id.slice(3)], onPick); return; }
+      const mine = (S.myFoods || {})[id]; if (mine) { pickFood(mine, onPick); return; }
+      const f = FOODS.find(x => x.id === id), it = foodItem(f);
       if (onPick) onPick(it); else resultSheet({ title: f.name, items: [it], slot: defaultSlot() }); });
   });
 }

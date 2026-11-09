@@ -216,3 +216,9 @@ function trNode(n) {
 }
 new MutationObserver(ms => { if (!S || S.lang !== 'en') return; for (const m of ms) m.addedNodes.forEach(trNode); }).observe(document.body, { childList: true, subtree: true });
 function applyLang() { document.documentElement.lang = S && S.lang === 'en' ? 'en' : 'de'; trCache.clear(); }
+/* Barcode and product search (v7) */
+Object.assign(EN, {
+  'Barcode scannen': 'Scan barcode', '+ Eigenes Lebensmittel anlegen': '+ Add your own food', 'Produktdaten von Open Food Facts (ODbL), Grundnahrungsmittel aus unserer Liste.': 'Product data from Open Food Facts (ODbL), basic foods from our list.',
+  'Suche in Open Food Facts …': 'Searching Open Food Facts …', 'Markenprodukte': 'Branded products', 'Nichts in der Grundliste gefunden.': 'Nothing found in the basic list.', 'Die Online-Suche ist gerade nicht erreichbar.': 'Online search isn’t available right now.', 'Tippe auf die Menge, um deine Portion einzustellen.': 'Tap the amount to set your serving.'
+});
+RULES.push([new RegExp('^([\\d.,]+) g KH( ·)?$'), '$1 g carbs$2'], [new RegExp('^(· )?pro 100 (g|ml): (.+)$'), (m, a, u, rest) => `${a || ''}per 100 ${u}: ${rest}`], [new RegExp('^Keine Markenprodukte zu „(.+)“ gefunden\\.$'), 'No branded products found for “$1”.'], [new RegExp('^„(.+)“ in Markenprodukten suchen$'), 'Search branded products for “$1”']);

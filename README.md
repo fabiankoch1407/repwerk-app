@@ -50,8 +50,8 @@ In der App: **Profil → Einstellungen → Konto** zum Anmelden, Synchronisieren
 | Datei / Ordner | Inhalt |
 | --- | --- |
 | `index.html` | Die fertige App (wird aus `src/` gebaut) |
-| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync) |
-| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` |
+| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync), `barcode.js` (Barcode-Scanner und Open Food Facts) |
+| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js`, `food.js` (Open-Food-Facts-Abfrage mit Zwischenspeicher) |
 | `supabase/setup.sql` | Datenbank-Einrichtung für Login und Sync |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installierbarkeit und Offline-Betrieb |
 | `build.py` | Baut `index.html` und `sw.js` aus `src/` (`python3 build.py`) |
