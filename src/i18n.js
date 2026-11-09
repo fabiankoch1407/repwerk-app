@@ -242,3 +242,8 @@ Object.assign(EN, {
   'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.': 'You’ve reached today’s limit for this AI feature. Pro gives you a lot more.',
   'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Bitte stimme zuerst der Verarbeitung deiner Gesundheitsdaten zu. Danach kannst du es noch einmal versuchen.': 'Please consent to the processing of your health data first, then try again.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
 });
+/* Meal plan: ready-made products (v11) */
+Object.assign(EN, { 'Fertige Produkte': 'Ready-made products', 'Alles selbst gemacht': 'All home-made', 'Für Frühstück und Snacks': 'For breakfast and snacks', 'So oft wie möglich': 'As often as possible',
+  'Zum Beispiel Skyr, Hüttenkäse, Proteinpudding, Wraps oder Fertigsalate aus dem Supermarkt. Spart Zeit, steht mit auf der Einkaufsliste.': 'For example skyr, cottage cheese, protein pudding, wraps or ready salads from the supermarket. Saves time and goes on the shopping list.',
+  'Fertigprodukt': 'Ready-made', 'Fertigprodukt · ohne Kochen': 'Ready-made · no cooking', 'viele Fertigprodukte': 'lots of ready-made products', 'alles selbst gemacht': 'all home-made', 'Einkaufen': 'To buy', 'So geht’s': 'How to', 'ohne Meal Prep': 'without meal prep' });
+RULES.push([new RegExp('^(Einkaufen|Zutaten) für (\\d+) (Portion|Portionen)$'), (m, a, n) => `${a === 'Einkaufen' ? 'To buy' : 'Ingredients'} for ${n} ${n === '1' ? 'serving' : 'servings'}`]);
