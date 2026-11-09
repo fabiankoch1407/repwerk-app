@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Repwerk Fitness",
+    "slug": "repwerk-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "repwerk",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#111214",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.repwerk.fitness"
+    },
+    "android": {
+      "package": "app.repwerk.fitness",
+      "adaptiveIcon": {
+        "backgroundColor": "#111214",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#111214",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120
+        }
+      ]
+    ]
+  }
+}
