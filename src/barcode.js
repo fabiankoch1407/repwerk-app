@@ -81,7 +81,7 @@ async function nativeDetector() {
 }
 function loadZx() {
   if (bcZxTried) return; bcZxTried = true;
-  Promise.race([import('https://fastly.jsdelivr.net/npm/barcode-detector@3/dist/es/ponyfill.min.js'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))])
+  Promise.race([import('https://cdn.jsdelivr.net/npm/barcode-detector@3/dist/es/ponyfill.min.js'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))])
     .then(m => { bcZx = new m.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); }).catch(() => { bcZx = null; });
 }
 const normCode = c => { c = String(c || '').replace(/\D/g, ''); if (c.length === 12) c = '0' + c; return c; };
