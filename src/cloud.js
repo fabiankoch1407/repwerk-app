@@ -41,7 +41,7 @@ async function cloudPush() {
   cloud.busy = true; cloud.dirty = false; cloud.state = 'syncing'; paintCloud();
   try {
     await sbFetch('/rest/v1/user_state?on_conflict=user_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.user.id, data: S, updated_at: new Date(S.at || Date.now()).toISOString() }) });
-    markSynced(); cloud.state = 'ok';
+    markSynced(); cloud.state = 'ok'; setTimeout(uploadPending, 500);
   } catch (e) { cloud.dirty = true; cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; }
   finally { cloud.busy = false; paintCloud(); if (cloud.dirty && cloud.state === 'ok') cloudSchedule(); }
 }
@@ -65,9 +65,10 @@ async function cloudSync(first) {
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
   const meta = lsGet(SYNC_KEY), known = meta && meta.uid === AUTH.user.id, localHas = !!(S && S.profile), remoteHas = !!(remote && remote.profile);
   if (!remoteHas && !localHas) { cloud.state = 'ok'; markSynced(); paintCloud(); return; }
-  if (remoteHas && !localHas) { adoptRemote(remote); cloud.state = 'ok'; if (first) toast(L('Angemeldet. Deine Daten sind geladen.', 'Signed in. Your data is loaded.')); return; }
-  if (!remoteHas && localHas) { await cloudPush(); if (first) toast(L('Angemeldet. Deine Daten sind jetzt gesichert.', 'Signed in. Your data is now backed up.')); return; }
+  if (remoteHas && !localHas) { adoptRemote(remote); cloud.state = 'ok'; setTimeout(refreshPro, 300); if (first) toast(L('Angemeldet. Deine Daten sind geladen.', 'Signed in. Your data is loaded.')); return; }
+  if (!remoteHas && localHas) { setTimeout(refreshPro, 300); await cloudPush(); if (first) toast(L('Angemeldet. Deine Daten sind jetzt gesichert.', 'Signed in. Your data is now backed up.')); return; }
   if (!known) { cloud.state = 'idle'; paintCloud(); conflictSheet(remote); return; }
+  setTimeout(refreshPro, 300);
   if ((remote.at || 0) > (S.at || 0)) { adoptRemote(remote); cloud.state = 'ok'; paintCloud(); }
   else if ((S.at || 0) > (remote.at || 0)) await cloudPush();
   else { cloud.state = 'ok'; markSynced(); paintCloud(); }
@@ -161,15 +162,16 @@ async function signOut() {
   if (cloud.dirty) { if (!await confirmBox(L('Nicht alles gesichert', 'Not everything is backed up'), L('Die letzten Änderungen konnten nicht hochgeladen werden. Trotzdem abmelden?', 'Your latest changes couldn’t be uploaded. Sign out anyway?'), L('Abmelden', 'Sign out'), true)) return; }
   try { await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {}
   setAuth(null); lsSet(SYNC_KEY, null); cloud = Object.assign(cloud, { state: 'out', at: 0, dirty: false });
-  const lang = S.lang; S = blank(); S.lang = lang; try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
+  clearLocalPhotos(); const lang = S.lang; S = blank(); S.lang = lang; try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
   applyDesign(); view = 'home'; render(); toast(L('Abgemeldet', 'Signed out'));
 }
 async function deleteAccount() {
   if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it.'), L('Konto löschen', 'Delete account'), true)) return;
+  await deleteAllCloudPhotos();
   try { await sbFetch('/rest/v1/rpc/delete_user', { method: 'POST', body: '{}' }); }
   catch (e) { toast(cloudErr(e) || L('Löschen hat nicht geklappt. Versuch es noch mal.', 'Deleting didn’t work. Try again.')); return; }
   setAuth(null); lsSet(SYNC_KEY, null); cloud = Object.assign(cloud, { state: 'out', at: 0, dirty: false });
-  S = blank(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
+  clearLocalPhotos(); S = blank(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
   applyDesign(); view = 'home'; render(); toast(L('Konto gelöscht', 'Account deleted'));
 }
 document.addEventListener('click', e => {
@@ -246,4 +248,63 @@ document.addEventListener('input', e => {
   if (e.target.id !== 'pq') return;
   clearTimeout(peopleTimer); const v = e.target.value.trim();
   peopleTimer = setTimeout(async () => { peopleQ = v; await loadPeople(); render(); const i = document.getElementById('pq'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (er) {} } }, 350);
+});
+
+/* ---------- Server features (AI login, payments) ---------- */
+let SRV = lsGet('repwerk-srv') || {};
+function setSRV(j) { SRV = { ai: !!j.ai, aiLogin: !!j.aiLogin, pay: !!j.pay, trialDays: j.trialDays || 0 }; lsSet('repwerk-srv', SRV); }
+const payOn = () => !IN_CLAUDE && !!SRV.pay;
+async function authHeaders() { const h = { 'content-type': 'application/json' }; if (loggedIn()) { const t = await accessToken(); if (t) h.Authorization = 'Bearer ' + t; } return h; }
+
+/* Pro status comes from public.entitlements, which only the Stripe webhook writes */
+async function refreshPro() {
+  if (!payOn()) return;
+  if (!loggedIn()) { if (S.pro) { S.pro = false; save(); render(); } return; }
+  let rows; try { rows = await sbFetch('/rest/v1/entitlements?select=pro_until,status', { method: 'GET' }); } catch (e) { return; }
+  const r = rows && rows[0], until = r && r.pro_until ? new Date(r.pro_until).getTime() : 0, pro = until > Date.now();
+  if (pro !== !!S.pro || S.proUntil !== until || S.proStatus !== (r && r.status)) { S.pro = pro; S.proUntil = until; S.proStatus = r ? r.status : ''; save(); render(); }
+  return pro;
+}
+async function buyPro(plan) {
+  if (!loggedIn()) { closeSheet(); loginSheet(); toast(L('Melde dich zuerst an, damit Pro mit deinem Konto verknüpft ist', 'Sign in first so Pro is linked to your account')); return; }
+  toast(L('Öffne die sichere Zahlung …', 'Opening secure checkout …'));
+  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ plan }) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  if (r.ok && j.url) { location.href = j.url; return; }
+  if (j.code === 'already_pro') { await refreshPro(); closeSheet(); toast(L('Du hast Pro schon', 'You already have Pro')); return; }
+  if (j.code === 'login') { loginSheet(); return; }
+  toast(L('Die Zahlung konnte nicht gestartet werden. Versuch es später noch mal.', 'Couldn’t start the payment. Please try again later.'));
+}
+async function openPortal() {
+  let r, j; try { r = await fetch('api/portal', { method: 'POST', headers: await authHeaders(), body: '{}' }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  if (r.ok && j.url) location.href = j.url; else toast(L('Die Abo-Verwaltung ist gerade nicht erreichbar.', 'Subscription management isn’t available right now.'));
+}
+function payButtonsHTML() {
+  const trial = SRV.trialDays ? L(`${SRV.trialDays} Tage gratis testen, danach `, `${SRV.trialDays}-day free trial, then `) : '';
+  return `<button class="card row" data-cl="buy:year" style="border-color:var(--ember);background:var(--ember-soft);text-align:left;width:100%"><div class="grow"><div style="font-weight:700">${L('Jährlich', 'Yearly')}</div><div class="cap">${trial}${L('59,99 € pro Jahr · entspricht 5,00 € im Monat', '€59.99 per year · €5.00 a month')}</div></div><span class="tag ember">−44 %</span></button>
+    <button class="card row" data-cl="buy:month" style="text-align:left;width:100%"><div class="grow"><div style="font-weight:700">${L('Monatlich', 'Monthly')}</div><div class="cap">${trial}${L('8,99 € pro Monat', '€8.99 per month')}</div></div>${ic('next', 18)}</button>
+    <p class="cap" style="margin:0;text-align:center">${L('Sichere Zahlung über Stripe. Jederzeit kündbar, verwalten in Einstellungen → Abo.', 'Secure payment via Stripe. Cancel any time in Settings → Subscription.')}${loggedIn() ? '' : ' ' + L('Zum Kaufen meldest du dich an.', 'You’ll sign in to buy.')}</p>`;
+}
+function aboCardHTML() {
+  if (!payOn()) return null;
+  const until = S.proUntil ? new Date(S.proUntil - (S.proStatus === 'active' || S.proStatus === 'trialing' || S.proStatus === 'past_due' ? 2 * 864e5 : 0)).toLocaleDateString(LOC(), { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const sub = S.pro ? (S.proStatus === 'trialing' ? L(`Pro · Testphase bis ${until}`, `Pro · trial until ${until}`) : S.proStatus === 'canceled' || S.proStatus === 'past_due' ? L(`Pro bis ${until}`, `Pro until ${until}`) : L(`Pro · verlängert sich am ${until}`, `Pro · renews on ${until}`)) : L('Free · mit Werbebannern', 'Free · with ad banners');
+  return `<div class="card"><div class="row" style="justify-content:space-between;gap:10px"><div><div class="lbl">${L('Abo', 'Subscription')}</div><div class="cap">${sub}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-cl="portal">${L('Verwalten', 'Manage')}</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">${L('Pro holen', 'Get Pro')}</button>`}</div></div>`;
+}
+function handleProReturn() {
+  const v = new URLSearchParams(location.search).get('pro'); if (!v) return;
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (v === 'cancel') { toast(L('Kauf abgebrochen. Es wurde nichts berechnet.', 'Purchase cancelled. You weren’t charged.')); return; }
+  if (v === 'portal') { refreshPro(); return; }
+  if (v === 'ok') {
+    toast(L('Zahlung erfolgreich. Pro wird freigeschaltet …', 'Payment successful. Activating Pro …'));
+    let n = 0; const poll = async () => { if (await refreshPro()) { toast(L('Willkommen bei Pro!', 'Welcome to Pro!')); return; } if (++n < 15) setTimeout(poll, 2000); else toast(L('Pro wird gleich aktiv. Öffne die App in ein paar Minuten neu.', 'Pro will be active shortly. Reopen the app in a few minutes.')); };
+    setTimeout(poll, 1500);
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-cl]'); if (!b || !S) return;
+  const [a, v] = b.dataset.cl.split(':');
+  if (a === 'buy') buyPro(v);
+  else if (a === 'portal') openPortal();
+  else if (a === 'paywall') { closeSheet(); paywall(); }
 });

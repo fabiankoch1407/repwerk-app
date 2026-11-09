@@ -28,7 +28,16 @@ Die KI läuft über eine kleine Server-Funktion bei Cloudflare (`functions/api/a
 3. In Cloudflare: dein Projekt → **Settings → Variables and Secrets → Add** → Typ **Secret**, Name `ANTHROPIC_API_KEY`, Wert = dein Schlüssel.
 4. **Deployments → Retry deployment** beim neuesten Eintrag, damit der Schlüssel aktiv wird.
 
-Solange kein Schlüssel eingetragen ist, zeigt die App bei den KI-Funktionen einen Hinweis und alles andere funktioniert normal.
+**Limits:** Sobald Supabase eingerichtet ist (nächster Abschnitt), braucht jede KI-Anfrage ein angemeldetes Konto, und die Datenbank zählt mit (`use_ai` in `supabase/setup.sql`):
+
+| | Free | Pro |
+| --- | --- | --- |
+| Foto-Scan | 3 pro Tag | 30 pro Tag |
+| Essen beschreiben | 10 pro Tag | 60 pro Tag |
+| AI Coach | 5 pro Woche | 50 pro Tag |
+| Ernährungsplan | – | 3 pro Woche |
+
+Ohne Supabase ist die KI für alle offen, die die Adresse kennen. Dann schützt nur das Ausgabelimit in der Anthropic Console.
 
 ## Login und Cloud-Speicher einschalten (Supabase, kostenlos)
 
@@ -45,13 +54,28 @@ Hinweis: Der eingebaute E-Mail-Versand von Supabase schickt nur wenige Mails pro
 
 In der App: **Profil → Einstellungen → Konto** zum Anmelden, Synchronisieren, Exportieren und Konto löschen. Mit Konto funktioniert auch die **Community**: Workouts teilen, Freunde per Name suchen oder per Einladungslink (`?freund=…`) hinzufügen, Feed.
 
+## Bezahlung für Pro einschalten (Stripe)
+
+Voraussetzung: Supabase ist eingerichtet. Zuerst alles im **Testmodus** von Stripe ausprobieren (Testkarte `4242 4242 4242 4242`).
+
+1. Auf [stripe.com](https://stripe.com) ein Konto anlegen.
+2. **Produktkatalog → Produkt hinzufügen**: „Repwerk Pro“ mit zwei wiederkehrenden Preisen, 8,99 € monatlich und 59,99 € jährlich. Die beiden Preis-IDs (`price_…`) kopieren.
+3. **Entwickler → Webhooks → Endpunkt hinzufügen**: URL `https://<deine-app>/api/stripe-webhook`, Ereignisse `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`. Das **Signing secret** (`whsec_…`) kopieren.
+4. **Einstellungen → Billing → Kundenportal** aktivieren (Kündigen, Zahlungsmethode ändern).
+5. In Supabase unter **Project Settings → API Keys** einen **Secret key** (`sb_secret_…`) anlegen. Der bleibt nur auf dem Server.
+6. In Cloudflare als **Secrets** anlegen: `STRIPE_SECRET_KEY` (`sk_test_…`, später `sk_live_…`), `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SECRET_KEY`. Als Variablen: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, optional `STRIPE_TRIAL_DAYS` (z. B. `7`). Danach **Retry deployment**.
+
+Die App zeigt dann im Pro-Fenster echte Kauf-Knöpfe statt der Demo. Nach dem Bezahlen schreibt der Webhook den Pro-Status in die Datenbank, die App liest ihn von dort. Kündigen und Rechnungen laufen über **Einstellungen → Abo → Verwalten**.
+
+Vor dem Live-Schalten brauchst du Impressum, Datenschutzerklärung, AGB mit Widerrufsbelehrung und Angaben zum Steuerstatus in Stripe. Hinweis: In den App-Stores ist für digitale Abos meist der Kauf über Apple bzw. Google vorgeschrieben. Stripe gilt für die Web-App.
+
 ## Projektaufbau
 
 | Datei / Ordner | Inhalt |
 | --- | --- |
 | `index.html` | Die fertige App (wird aus `src/` gebaut) |
-| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync), `barcode.js` (Barcode-Scanner und Open Food Facts) |
-| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js`, `food.js` (Open-Food-Facts-Abfrage mit Zwischenspeicher) |
+| `src/` | Quellcode: `head.html` (Layout und Design), `app.js` (App), `data.js` (Lebensmittel, Übungen), `anim.js` (Übungs-Animationen), `i18n.js` (Englisch), `smart.js` (Smarter Coach), `cloud.js` (Login und Sync), `barcode.js` (Barcode-Scanner und Open Food Facts), `media.js` (Workout-Fotos) |
+| `functions/api/` | Server-Funktionen bei Cloudflare: `health.js`, `ai.js` (KI mit Limits), `food.js` (Open Food Facts), `checkout.js`, `portal.js`, `stripe-webhook.js` (Pro-Abo) |
 | `supabase/setup.sql` | Datenbank-Einrichtung für Login und Sync |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installierbarkeit und Offline-Betrieb |
 | `build.py` | Baut `index.html` und `sw.js` aus `src/` (`python3 build.py`) |

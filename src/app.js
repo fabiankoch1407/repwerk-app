@@ -69,8 +69,9 @@ const aiOffText = () => IN_CLAUDE ? 'Die KI funktioniert, wenn du den Prototyp i
 // Standalone: the AI runs through our own server function (/api/ai). Same interface as Claude's sample capability.
 function apiError(code) { const e = new Error(code); e.code = code; return e; }
 async function apiCall(body) {
+  if (SRV.aiLogin && !loggedIn()) throw apiError('login');
   let r;
-  try { r = await fetch('api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
+  try { r = await fetch('api/ai', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw apiError(j.code || (r.status === 429 ? 'rate_limited' : 'server'));
   return j;
@@ -81,7 +82,7 @@ function makeApiSample() {
   fn.json = async (input, opts = {}) => {
     const images = [];
     for (const b of (opts.images || [])) { let url; try { url = await compressImage(b, 1280, 0.8); } catch (e) { url = await blobToDataUrl(b); } images.push(url); }
-    const j = await apiCall({ prompt: input, images, json: true });
+    const j = await apiCall({ prompt: input, images, json: true, kind: opts.kind });
     if (!j.json) throw apiError('invalid_json');
     return j.json;
   };
@@ -89,7 +90,7 @@ function makeApiSample() {
   return fn;
 }
 async function connectApi() {
-  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) setSB(j.supabase); render(); if (loggedIn()) cloudSync(false); handleInviteParam(); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
+  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) { setSB(j.supabase); setSRV(j); } render(); if (loggedIn()) cloudSync(false); else refreshPro(); handleInviteParam(); handleProReturn(); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
 }
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S && S.profile && view === 'home') render(); });
@@ -172,7 +173,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appl
 /* ---------- Claude ---------- */
 let sampleFn = null, sampleImages = false;
 async function connectSample() { try { sampleFn = await claude.use('sample'); if (sampleFn) { const l = await sampleFn.limits().catch(() => null); sampleImages = !!(l && l.images); } } catch (e) { sampleFn = null; } render(); }
-const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
+const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
 const ALLERGENS = { laktose: 'Laktose', gluten: 'Gluten', nuesse: 'Nüsse', ei: 'Ei', fisch: 'Fisch', soja: 'Soja' };
 const DIETS = { alles: 'Alles', vegetarisch: 'Vegetarisch', vegan: 'Vegan', pescetarisch: 'Pescetarisch' };
 function foodPrompt() {
@@ -672,6 +673,7 @@ function vWorkout() {
       <button class="btn btn-s btn-block" style="height:40px;margin-top:8px" data-addset="${xi}">+ Satz hinzufügen</button></div>`; }).join('')}
     <div class="cap" style="text-align:center">Tippe auf die Satznummer für <b style="color:var(--warning)">W</b> Aufwärmen, <b style="color:#8B6CFF">D</b> Dropsatz oder <b style="color:var(--critical)">F</b> bis zum Versagen. ${infoBtn('sets')}</div>
     <button class="btn btn-p btn-block" data-act="wraddex">${ic('plus', 20)} Übung hinzufügen</button>
+    <div id="wph" style="display:flex;flex-direction:column;gap:10px">${photoStrip(a.photos || [], { edit: true })}${photoAddBtn(a.photos || [], 'data-wph')}</div>
     <button class="btn btn-d btn-block" data-act="cancelworkout">Training verwerfen</button>`;
 }
 function setTypeSheet(xs, xi, si, after) {
@@ -698,7 +700,8 @@ function finishWorkout() {
   const a = S.active, done = doneCount(a);
   if (!done) { confirmBox('Noch keine Sätze erledigt', 'Hake mindestens einen Satz ab oder verwirf das Training.', 'Okay'); return; }
   const fresh = !a.routineId;
-  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', photo: '', share: !!CB, asRoutine: fresh };
+  a.photos = a.photos || [];
+  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', share: !!CB, asRoutine: fresh };
   const draw = sh => {
     sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">Training speichern</h2><button class="iconbtn" data-close-sheet aria-label="Zurück zum Training">${ic('x')}</button></div>
       <input class="input" id="f-name" value="${esc(d.name)}" aria-label="Titel" style="font-weight:700">
@@ -707,18 +710,18 @@ function finishWorkout() {
         ${S.gyms.length ? `<div class="chips">${S.gyms.slice(0, 4).map(g => `<button class="chip ${d.gym === g ? 'on' : ''}" data-gym="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
         <span class="cap">In der App schlagen wir Studios in deiner Nähe über den Standort vor, nur wenn du es erlaubst. Im Prototyp merken wir uns deine Gyms.</span></label>
       <label class="field"><span class="lbl">Notiz</span><textarea class="input" id="f-note" placeholder="Wie lief es? Neue Technik, Schmerzen, Stimmung …">${esc(d.note)}</textarea></label>
-      <div class="field"><span class="lbl">Foto</span>${d.photo ? `<img class="photo" src="${d.photo}" alt="Dein Trainingsfoto"><button class="btn btn-g" data-nophoto>Foto entfernen</button>` : `<label class="btn btn-s btn-block">${ic('img', 20)} Foto hinzufügen<input type="file" accept="image/*" class="hidden" data-fphoto></label>`}</div>
-      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${CB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Foto.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Melde dich an, um Workouts zu teilen.')}</div></div><button class="toggle ${d.share && CB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && CB)}" ${CB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
+      <div class="field"><span class="lbl">Fotos</span>${photoStrip(a.photos, { edit: true })}${photoAddBtn(a.photos, 'data-fphoto')}</div>
+      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${CB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Fotos.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Melde dich an, um Workouts zu teilen.')}</div></div><button class="toggle ${d.share && CB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && CB)}" ${CB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
       ${fresh ? `<div class="sel"><div class="grow"><div style="font-weight:600">Als Routine speichern</div><div class="cap">Übungen und Sätze als Vorlage für das nächste Mal.</div></div><button class="toggle ${d.asRoutine ? 'on' : ''}" data-ftog="asRoutine" role="switch" aria-checked="${d.asRoutine}" aria-label="Als Routine speichern"></button></div>` : ''}
       <button class="btn btn-p btn-block" data-fsave>Speichern</button>`;
   };
   openSheet('', sh => {
     draw(sh);
     const read = () => { d.min = Math.max(1, Math.min(600, Math.round(num(sh.querySelector('#f-dur').value)) || d.min)); d.name = sh.querySelector('#f-name').value.trim() || a.name; d.gym = sh.querySelector('#f-gym').value.trim(); d.note = sh.querySelector('#f-note').value.trim(); };
-    sh.addEventListener('change', async ev => { if (ev.target.matches('[data-fphoto]') && ev.target.files[0]) { read(); try { d.photo = await compressImage(ev.target.files[0], 900, 0.72); } catch (e) { toast('Dieses Bild konnte nicht geladen werden'); } draw(sh); } });
+    sh.addEventListener('change', async ev => { if (ev.target.matches('[data-fphoto]') && ev.target.files.length) { read(); if (await addPhotoFiles(ev.target.files, a.photos)) save(); draw(sh); } });
     sh.addEventListener('click', async ev => {
       const g = ev.target.closest('[data-gym]'); if (g) { read(); d.gym = g.dataset.gym; draw(sh); return; }
-      if (ev.target.closest('[data-nophoto]')) { read(); d.photo = ''; draw(sh); return; }
+      const rm = ev.target.closest('[data-rmph]'); if (rm) { ev.stopPropagation(); read(); const [ph] = a.photos.splice(+rm.dataset.rmph, 1); deletePhotos([ph]); save(); draw(sh); return; }
       const tg = ev.target.closest('[data-ftog]'); if (tg && !tg.disabled) { read(); d[tg.dataset.ftog] = !d[tg.dataset.ftog]; draw(sh); return; }
       if (!ev.target.closest('[data-fsave]')) return;
       read(); ev.target.closest('[data-fsave]').disabled = true;
@@ -730,7 +733,7 @@ function finishWorkout() {
       if (d.asRoutine && fresh) S.routines.push({ id: uid(), name: d.name, exercises: a.exercises.map(x => ({ exId: x.exId, rest: x.rest, note: x.note, sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) });
       if (a.routineId && a.routineId.startsWith('plan-')) S.planIndex++;
       let posted = false;
-      if (d.share && CB) { try { await postWorkout(a, d.photo); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
+      if (d.share && CB) { try { await postWorkout(a); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
       S.workouts.push(a); S.active = null; stopRest(); save(); closeSheet(); view = 'train'; render(); feed = null;
       summarySheet(a, posted, streakBefore);
     });
@@ -768,7 +771,7 @@ function summarySheet(a, posted, streakBefore) {
 function workoutDetailHTML(w, opts = {}) {
   const exs = w.exercises || [];
   return `${opts.head || ''}<div><div class="cap">${new Date(w.start).toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long' })}${w.gym ? ' · ' + esc(w.gym) : ''}</div><h2 class="disp">${esc(w.name)}</h2></div>
-    ${w.photo ? `<img class="photo" src="${esc(w.photo)}" alt="Trainingsfoto">` : ''}
+    ${photoStrip(photosOf(w))}
     ${w.note ? `<p translate="no" style="margin:0;white-space:pre-wrap">${esc(w.note)}</p>` : ''}
     <div class="card stats3" style="padding:12px 14px"><div><span class="cap">Dauer</span><span class="disp" style="font-size:18px">${dur(wDur(w))}</span></div><div><span class="cap">Volumen</span><span class="disp" style="font-size:18px">${fmt(w.volume ?? volume(w))} kg</span></div><div><span class="cap">Sätze</span><span class="disp" style="font-size:18px">${w.sets ?? doneCount(w)}</span></div></div>
     ${(w.prs || []).length ? `<div class="banner" style="background:color-mix(in srgb, var(--good) 16%, transparent)"><span style="color:var(--good)">${ic('trophy', 20)}</span><div><b>Rekorde:</b> ${w.prs.map(esc).join(', ')}</div></div>` : ''}
@@ -776,21 +779,22 @@ function workoutDetailHTML(w, opts = {}) {
 }
 function workoutDetail(id) {
   const w = S.workouts.find(x => x.id === id); if (!w) return;
-  openSheet(workoutDetailHTML(w) + `<div class="grid2"><button class="btn btn-s" data-wd="sum">${ic('stats', 18)} Zusammenfassung</button><button class="btn btn-s" data-wd="time">${ic('timer', 18)} Dauer ändern</button></div><div class="grid2"><button class="btn btn-s" data-wd="routine">Als Routine speichern</button><button class="btn btn-d" data-wd="del">Löschen</button></div>`, sh => sh.addEventListener('click', async ev => {
+  openSheet(workoutDetailHTML(w) + `<button class="btn btn-s btn-block" data-wd="photos">${ic('img', 18)} ${photosOf(w).length ? 'Fotos bearbeiten' : 'Fotos hinzufügen'}</button><div class="grid2"><button class="btn btn-s" data-wd="sum">${ic('stats', 18)} Zusammenfassung</button><button class="btn btn-s" data-wd="time">${ic('timer', 18)} Dauer ändern</button></div><div class="grid2"><button class="btn btn-s" data-wd="routine">Als Routine speichern</button><button class="btn btn-d" data-wd="del">Löschen</button></div>`, sh => sh.addEventListener('click', async ev => {
     const b = ev.target.closest('[data-wd]'); if (!b) return;
     if (b.dataset.wd === 'time') { closeSheet(); editTimeSheet(w); return; }
+    if (b.dataset.wd === 'photos') { editPhotosSheet(w); return; }
     if (b.dataset.wd === 'sum') { closeSheet(); summarySheet(w, w.posted, weekStreak()); return; }
     if (b.dataset.wd === 'routine') { S.routines.push({ id: uid(), name: w.name, exercises: w.exercises.map(x => ({ exId: x.exId, rest: x.rest ?? 90, note: x.note || '', sets: x.sets.map(s => ({ type: s.type || 'n', kg: s.kg, reps: s.reps })) })) }); save(); closeSheet(); render(); toast('Als Routine gespeichert'); }
-    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); if (w.posted && CB) { try { await CB.deletePost(w.id); } catch (e) {} } save(); closeSheet(); render(); }
+    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); deletePhotos(photosOf(w)); if (w.posted && CB) { try { await CB.deletePost(w.id); } catch (e) {} } save(); closeSheet(); render(); }
   }));
 }
 
 /* ---------- Community ---------- */
 async function publishProfile() { if (!CB || !UID) return; await CB.setProfile({ name: S.social.name || 'Ohne Namen', bio: S.social.bio || '', avatar: S.social.avatar || '', goal: S.profile ? GOALS[S.profile.goal] : '', at: Date.now() }); }
-async function postWorkout(a, photo) {
+async function postWorkout(a) {
   if (!S.social.name) S.social.name = S.profile.name || 'Ohne Namen';
   await publishProfile();
-  const post = { id: a.id, author: UID, name: a.name, gym: a.gym || '', note: a.note || '', photo: photo || '', start: a.start, end: a.end, dur: wDur(a), at: Date.now(), volume: r0(volume(a)), sets: doneCount(a), prs: a.prs || [],
+  const post = { id: a.id, author: UID, name: a.name, gym: a.gym || '', note: a.note || '', ...(await postPhotos(photosOf(a))), start: a.start, end: a.end, dur: wDur(a), at: Date.now(), volume: r0(volume(a)), sets: doneCount(a), prs: a.prs || [],
     exercises: a.exercises.map(x => ({ exId: x.exId, name: exOf(x.exId).name, note: x.note || '', sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) };
   const json = JSON.stringify(post); if (json.length > 240000) post.photo = '';
   await CB.setPost(post);
@@ -818,7 +822,7 @@ function postCard(p) {
     <button data-post="${esc(p.author)}:${esc(p.id)}" style="border:0;background:transparent;padding:0;text-align:left;display:flex;flex-direction:column;gap:8px">
       <div style="font-weight:800;font-size:18px">${esc(p.name)}</div>${p.note ? `<div class="muted" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(p.note)}</div>` : ''}
       <div class="stats3" style="width:100%"><div><span class="cap">Dauer</span><b>${dur(wDur(p))}</b></div><div><span class="cap">Volumen</span><b>${fmt(p.volume)} kg</b></div><div><span class="cap">Sätze</span><b>${p.sets}</b></div></div>
-      ${p.photo ? `<img class="photo" src="${esc(p.photo)}" alt="Trainingsfoto von ${esc(p.who.name || '')}" loading="lazy">` : ''}
+      ${photoStrip(photosOf(p))}
       <div class="cap">${exs.slice(0, 4).map(x => `${x.sets.length} × ${esc(x.name)}`).join(' · ')}${exs.length > 4 ? ` · +${exs.length - 4} weitere` : ''}</div>
       ${(p.prs || []).length ? `<span class="tag" style="color:var(--good)">${ic('trophy', 14)} ${p.prs.length} Rekord${p.prs.length > 1 ? 'e' : ''}</span>` : ''}
     </button></div>`;
@@ -930,7 +934,7 @@ function vSettings() {
       <div class="field"><span class="cap">Ecken</span>${segm('corners', [['round','Rund'],['square','Kantig']], d.corners)}</div>
       <div class="field"><span class="cap">Kalorienring zeigt</span>${segm('ring', [['left','Übrig'],['eaten','Gegessen']], d.ring)}</div></div>
     <div class="card"><div class="lbl" style="margin-bottom:4px">Erinnerungen</div>${[['training','Training an Trainingstagen'],['meals','Mahlzeiten eintragen'],['water','Wasser trinken']].map(([k, l]) => `<div class="sel"><div class="grow">${l}</div><button class="toggle ${S.reminders[k] ? 'on' : ''}" data-rem="${k}" role="switch" aria-checked="${!!S.reminders[k]}" aria-label="${l}"></button></div>`).join('')}<div class="cap">Push-Mitteilungen kommen mit der App.</div></div>
-    <div class="card"><div class="row" style="justify-content:space-between"><div><div class="lbl">Abo</div><div class="cap">${S.pro ? 'Pro (Demo aktiv) · werbefrei' : 'Free · mit Werbebannern'}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-act="unpro">Zurück zu Free</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">Pro ansehen</button>`}</div></div>
+    ${aboCardHTML() || `<div class="card"><div class="row" style="justify-content:space-between"><div><div class="lbl">Abo</div><div class="cap">${S.pro ? 'Pro (Demo aktiv) · werbefrei' : 'Free · mit Werbebannern'}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-act="unpro">Zurück zu Free</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">Pro ansehen</button>`}</div></div>`}
     <div class="card"><div class="lbl">Datenschutz</div><ul class="steps muted" style="margin-top:6px">
       <li>Übungsvideos sind Animationen, die direkt im Prototyp laufen. Es werden keine Videos von YouTube oder anderen Anbietern geladen.</li>
       <li>Fotos gehen nur zur Analyse an die KI, wenn du sie auswählst, und werden dafür nicht gespeichert.</li>
@@ -1157,7 +1161,7 @@ async function onClick(e) {
     case 'finish': finishWorkout(); break;
     case 'pausew': { const w = S.active; if (!w) break; if (w.pausedAt) { w.pausedMs = (w.pausedMs || 0) + (Date.now() - w.pausedAt); w.pausedAt = null; toast('Training läuft weiter'); } else { w.pausedAt = Date.now(); stopRest(); toast('Training pausiert'); } save(); render(); break; }
     case 'wraddex': pickExercises(ids => { ids.forEach(id => { const n = newExEntry(id); n.sets.forEach(s => s.done = false); S.active.exercises.push(n); }); save(); render(); }); break;
-    case 'cancelworkout': if (await confirmBox('Training verwerfen?', 'Alle Sätze dieser Einheit werden gelöscht.', 'Verwerfen', true)) { S.active = null; stopRest(); save(); view = 'train'; render(); } break;
+    case 'cancelworkout': if (await confirmBox('Training verwerfen?', 'Alle Sätze dieser Einheit werden gelöscht.', 'Verwerfen', true)) { deletePhotos(S.active.photos || []); S.active = null; stopRest(); save(); view = 'train'; render(); } break;
     case 'newroutine': editRoutine(null); break;
     case 'raddex': readRoutine(); pickExercises(ids => { ids.forEach(id => R.exercises.push(newExEntry(id))); render(); }); break;
     case 'rcancel': R = null; view = 'train'; render(); break;
@@ -1174,7 +1178,7 @@ async function onClick(e) {
     case 'invite': if (!S.social.name) { editProfileSheet(); toast('Leg zuerst dein Profil an, damit Freunde dich erkennen'); } else { publishProfile().catch(() => {}); shareInvite(); } break;
     case 'reset': if (await confirmBox('Alle Daten löschen?', 'Profil, Mahlzeiten, Trainings, Routinen und Gewicht werden gelöscht. Geteilte Workouts entfernen wir aus der Community.', 'Löschen', true)) {
       if (CB && UID) { try { await CB.deleteAll(); } catch (er) {} }
-      S = blank(); save(); applyDesign(); view = 'home'; render(); } break;
+      if (loggedIn()) await deleteAllCloudPhotos(); clearLocalPhotos(); S = blank(); save(); applyDesign(); view = 'home'; render(); } break;
   }
 }
 function readRoutine() {
@@ -1339,7 +1343,7 @@ async function runAnalysis(src) {
     resultSheet({ title: res.title, items: res.items, water: res.water, note: res.note, url, slot: defaultSlot() });
   } catch (e) {
     if (e && e.code === 'cancelled') { closeSheet(); return; }
-    openSheet(`<h2 class="disp">Hat nicht geklappt</h2><p class="muted" style="margin:0">${esc(errText(e))}</p><div class="grid2"><button class="btn btn-s" data-r="search">Suchen</button><button class="btn btn-p" data-r="text">Beschreiben</button></div>`, sh => sh.addEventListener('click', ev => { const b = ev.target.closest('[data-r]'); if (!b) return; closeSheet(); b.dataset.r === 'search' ? searchSheet() : textFlow(); }));
+    openSheet(`<h2 class="disp">Hat nicht geklappt</h2><p class="muted" style="margin:0">${esc(errText(e))}</p>${e && e.code === 'login' ? '<button class="btn btn-p btn-block" data-cl="login">Anmelden</button>' : e && (e.code === 'limit' || e.code === 'pro') ? '<button class="btn btn-p btn-block" data-cl="paywall">Pro ansehen</button>' : ''}<div class="grid2"><button class="btn btn-s" data-r="search">Suchen</button><button class="btn btn-p" data-r="text">Beschreiben</button></div>`, sh => sh.addEventListener('click', ev => { const b = ev.target.closest('[data-r]'); if (!b) return; closeSheet(); b.dataset.r === 'search' ? searchSheet() : textFlow(); }));
   }
 }
 const XN = ['fib', 'sug', 'sat', 'salt', 'mufa', 'pufa', 'trans', 'chol', 'kal', 'ca', 'fe', 'va', 'vc'];
@@ -1478,7 +1482,7 @@ Antworte NUR mit JSON in dieser Form:
 "prep":[{"day":"${days[0].wd}","recipes":["r2","r3"],"minutes":90,"steps":["Reis für 4 Portionen kochen"]}],
 "shopping":[{"item":"Hähnchenbrust","amount":"1,2 kg","category":"Fleisch & Fisch"}]}
 Regeln: kcal und Makros gelten pro Portion für eine Person. portions = wie oft das Rezept im Plan gegessen wird. ingredients gelten für alle portions einer Person, höchstens 10 Zutaten. steps höchstens 5 kurze Sätze. days enthält genau ${days.length} Einträge mit je ${slots.length} meals. prep ist leer, wenn kein Meal Prep. visual.style ist einer von plate, bowl, box, wrap, glass, pan (box für Meal-Prep-Gerichte); visual.colors sind 3 bis 5 echte Farben der Hauptzutaten als Hex. shopping.category ist einer von: ${SHOP_CAT.join(', ')}. Keine medizinischen Ratschläge.`;
-  const out = await sampleFn.json(prompt, { cache: false });
+  const out = await sampleFn.json(prompt, IN_CLAUDE ? { cache: false } : { cache: false, kind: 'mealplan' });
   const recipes = (Array.isArray(out && out.recipes) ? out.recipes : []).slice(0, 20).map((r, i) => ({ id: String(r.id || 'r' + i), name: String(r.name || 'Gericht').slice(0, 70), slot: SLOTS.some(s => s[0] === r.slot) ? r.slot : 'mittag', portions: Math.max(1, Math.round(num(r.portions) || 1)), kcal: num(r.kcal), protein: num(r.protein), carbs: num(r.carbs), fat: num(r.fat), fiber: r.fiber != null ? num(r.fiber) : undefined, minutes: Math.round(num(r.minutes)) || p.time, mealprep: !!r.mealprep, storage: String(r.storage || '').slice(0, 80), ingredients: (r.ingredients || []).map(String).slice(0, 14), steps: (r.steps || []).map(String).slice(0, 8), visual: r.visual && typeof r.visual === 'object' ? { style: String(r.visual.style || ''), colors: (r.visual.colors || []).map(String) } : {} }));
   const ids = new Set(recipes.map(r => r.id));
   const dayList = (Array.isArray(out.days) ? out.days : []).slice(0, days.length).map((d, i) => ({ key: days[i].key, label: days[i].label, meals: (Array.isArray(d.meals) ? d.meals : []).filter(m => ids.has(String(m.recipe))).map(m => ({ slot: SLOTS.some(s => s[0] === m.slot) ? m.slot : 'mittag', recipe: String(m.recipe), eaten: false })) }));
@@ -1540,11 +1544,11 @@ function recipeSheet(id) {
 function paywall(reason) {
   openSheet(`${reason ? `<div class="banner">${ic('lock', 18)}<div>${esc(reason)}</div></div>` : ''}<span class="tag ember" style="align-self:flex-start">Repwerk Pro</span><h2 class="disp" style="font-size:28px;line-height:32px">Dein Plan passt sich jede Woche an.</h2>
     <ul class="list">${['Keine Werbung','30 KI-Scans pro Tag statt 3','KI-Ernährungsplan mit Rezepten und Einkaufsliste','AI Coach mit 50 Nachrichten pro Tag','Trainingsplan, der mit deiner Leistung wächst','Wochen- und Monatsberichte'].map(x => `<li><span style="color:var(--good)">${ic('check', 20)}</span>${x}</li>`).join('')}</ul>
-    <div class="card row" style="border-color:var(--ember);background:var(--ember-soft)"><div class="grow"><div style="font-weight:700">Jährlich</div><div class="cap">59,99 € pro Jahr · entspricht 5,00 € im Monat</div></div><span class="tag ember">−44 %</span></div>
-    <div class="card"><div style="font-weight:700">Monatlich</div><div class="cap">8,99 € pro Monat</div></div>
-    <button class="btn btn-p btn-block" data-pro>Pro in der Demo freischalten</button>
-    <p class="cap" style="margin:0;text-align:center">Prototyp: Es wird nichts bezahlt. In der App läuft der Kauf über App Store bzw. Google Play mit 7 Tagen gratis, jederzeit kündbar.</p>
-    <button class="btn btn-g btn-block" data-close-sheet style="color:var(--ink-muted)">Mit Free weitermachen</button>`, sh => sh.addEventListener('click', ev => { if (ev.target.closest('[data-pro]')) { S.pro = true; save(); closeSheet(); render(); toast('Pro ist in der Demo aktiv'); } }));
+    ${payOn() ? '' : `<div class="card row" style="border-color:var(--ember);background:var(--ember-soft)"><div class="grow"><div style="font-weight:700">Jährlich</div><div class="cap">59,99 € pro Jahr · entspricht 5,00 € im Monat</div></div><span class="tag ember">−44 %</span></div>
+    <div class="card"><div style="font-weight:700">Monatlich</div><div class="cap">8,99 € pro Monat</div></div>`}
+    ${payOn() ? payButtonsHTML() : `<button class="btn btn-p btn-block" data-pro>Pro in der Demo freischalten</button>
+    <p class="cap" style="margin:0;text-align:center">Prototyp: Es wird nichts bezahlt. In der App läuft der Kauf über App Store bzw. Google Play mit 7 Tagen gratis, jederzeit kündbar.</p>`}
+    <button class="btn btn-g btn-block" data-close-sheet style="color:var(--ink-muted)">Mit Free weitermachen</button>`, sh => sh.addEventListener('click', ev => { if (ev.target.closest('[data-pro]') && !payOn()) { S.pro = true; save(); closeSheet(); render(); toast('Pro ist in der Demo aktiv'); } }));
 }
 
 /* ---------- Coach ---------- */

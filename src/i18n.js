@@ -234,3 +234,11 @@ Object.assign(EN, {
   'Leg zuerst dein Profil an, damit Freunde dich erkennen': 'Set up your profile first so friends recognise you', '1 Workout': '1 workout'
 });
 RULES.push([new RegExp('^\\+(\\d+) weitere$'), '+$1 more']);
+/* Workout photos (v9) */
+Object.assign(EN, { 'Fotos': 'Photos', 'Fotos bearbeiten': 'Edit photos', 'Fotos hinzufügen': 'Add photos', 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Fotos.': 'Friends who follow you see the title, gym, exercises, sets, note and photos.' });
+/* AI login, limits and payments (v10) */
+Object.assign(EN, {
+  'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.': 'Sign in to use the AI. That keeps it fast and fair for everyone.',
+  'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.': 'You’ve reached today’s limit for this AI feature. Pro gives you a lot more.',
+  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
+});

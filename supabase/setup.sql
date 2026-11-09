@@ -85,3 +85,94 @@ create policy "posts delete own" on public.posts for delete to authenticated usi
 revoke all on public.posts from anon;
 grant select, insert, update, delete on public.posts to authenticated;
 create index if not exists posts_author_at on public.posts (author, at desc);
+
+-- ---------------------------------------------------------------------------
+-- Workout photos: Storage bucket "workout-photos", one folder per user (<user id>/<photo id>.jpg).
+-- Files are public by link (needed for the community feed); the photo ids are random. Only the owner can upload or delete.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('workout-photos', 'workout-photos', true, 2097152, array['image/jpeg'])
+on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "workout photos read own" on storage.objects;
+drop policy if exists "workout photos insert own" on storage.objects;
+drop policy if exists "workout photos update own" on storage.objects;
+drop policy if exists "workout photos delete own" on storage.objects;
+create policy "workout photos read own" on storage.objects for select to authenticated
+  using (bucket_id = 'workout-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "workout photos insert own" on storage.objects for insert to authenticated
+  with check (bucket_id = 'workout-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "workout photos update own" on storage.objects for update to authenticated
+  using (bucket_id = 'workout-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "workout photos delete own" on storage.objects for delete to authenticated
+  using (bucket_id = 'workout-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- ---------------------------------------------------------------------------
+-- Pro status, written only by the Stripe webhook (server, secret key). Users can read their own row.
+create table if not exists public.entitlements (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  pro_until timestamptz,
+  status text,
+  stripe_customer text,
+  stripe_subscription text,
+  updated_at timestamptz not null default now()
+);
+alter table public.entitlements enable row level security;
+drop policy if exists "entitlements read own" on public.entitlements;
+create policy "entitlements read own" on public.entitlements for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.entitlements from anon, authenticated;
+grant select on public.entitlements to authenticated;
+
+-- AI usage counter. Only use_ai() writes it, so nobody can reset their own limits.
+create table if not exists public.ai_usage (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  period text not null,
+  kind text not null,
+  n int not null default 0,
+  primary key (user_id, period, kind)
+);
+alter table public.ai_usage enable row level security;
+drop policy if exists "ai_usage read own" on public.ai_usage;
+create policy "ai_usage read own" on public.ai_usage for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.ai_usage from anon, authenticated;
+grant select on public.ai_usage to authenticated;
+
+-- Called by /api/ai before every AI request. Counts one use and says whether it is allowed.
+-- Limits (Free / Pro): photo scan 3 / 30 per day, text analysis 10 / 60 per day,
+-- coach 5 per week / 50 per day, meal plan Pro only, 3 per week. Days and weeks follow German time.
+create or replace function public.use_ai(p_kind text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_pro boolean := false;
+  v_lim int;
+  v_period text;
+  v_n int;
+  v_now timestamp := now() at time zone 'Europe/Berlin';
+begin
+  if v_uid is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  if p_kind is null or p_kind not in ('scan', 'text', 'coach', 'mealplan') then p_kind := 'text'; end if;
+  select coalesce(e.pro_until > now(), false) into v_pro from public.entitlements e where e.user_id = v_uid;
+  v_pro := coalesce(v_pro, false);
+  v_lim := case p_kind
+    when 'scan' then case when v_pro then 30 else 3 end
+    when 'text' then case when v_pro then 60 else 10 end
+    when 'coach' then case when v_pro then 50 else 5 end
+    else case when v_pro then 3 else 0 end
+  end;
+  if v_lim = 0 then return jsonb_build_object('ok', false, 'error', 'pro', 'limit', 0, 'pro', v_pro); end if;
+  v_period := case when p_kind = 'mealplan' or (p_kind = 'coach' and not v_pro)
+    then 'w' || to_char(date_trunc('week', v_now), 'YYYY-MM-DD')
+    else 'd' || to_char(v_now, 'YYYY-MM-DD') end;
+  insert into public.ai_usage as u (user_id, period, kind, n) values (v_uid, v_period, p_kind, 1)
+  on conflict (user_id, period, kind) do update set n = u.n + 1 where u.n < v_lim
+  returning u.n into v_n;
+  if v_n is null then return jsonb_build_object('ok', false, 'error', 'limit', 'limit', v_lim, 'pro', v_pro); end if;
+  return jsonb_build_object('ok', true, 'used', v_n, 'limit', v_lim, 'pro', v_pro);
+end;
+$$;
+revoke execute on function public.use_ai(text) from public, anon;
+grant execute on function public.use_ai(text) to authenticated;

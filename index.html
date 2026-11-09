@@ -289,6 +289,12 @@ body.has-active .screen { padding-bottom:calc(180px + env(safe-area-inset-bottom
 @media (prefers-reduced-motion: reduce) { .scanguide i { animation:none; } }
 .torchb { position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.55); color:#fff; }
 .torchb.on { background:var(--ember); color:var(--on-ember); }
+.phstrip { display:flex; gap:8px; overflow-x:auto; scroll-snap-type:x mandatory; margin:0 -2px; padding:2px; flex-shrink:0; }
+.phstrip .ph { position:relative; flex:0 0 auto; width:calc(50% - 4px); max-width:240px; aspect-ratio:4/5; border-radius:var(--r-md); overflow:hidden; background:var(--surface-2); scroll-snap-align:start; }
+.phstrip .ph:only-child { width:100%; max-width:none; aspect-ratio:4/3; }
+.phstrip img { width:100%; height:100%; object-fit:cover; display:block; cursor:zoom-in; }
+.phstrip .phx { position:absolute; top:6px; right:6px; width:30px; height:30px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; display:grid; place-items:center; }
+.phfull { width:100%; max-height:75vh; object-fit:contain; border-radius:var(--r-md); background:#000; }
 </style>
 </head>
 <body>
@@ -825,6 +831,14 @@ Object.assign(EN, {
   'Leg zuerst dein Profil an, damit Freunde dich erkennen': 'Set up your profile first so friends recognise you', '1 Workout': '1 workout'
 });
 RULES.push([new RegExp('^\\+(\\d+) weitere$'), '+$1 more']);
+/* Workout photos (v9) */
+Object.assign(EN, { 'Fotos': 'Photos', 'Fotos bearbeiten': 'Edit photos', 'Fotos hinzufügen': 'Add photos', 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Fotos.': 'Friends who follow you see the title, gym, exercises, sets, note and photos.' });
+/* AI login, limits and payments (v10) */
+Object.assign(EN, {
+  'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.': 'Sign in to use the AI. That keeps it fast and fair for everyone.',
+  'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.': 'You’ve reached today’s limit for this AI feature. Pro gives you a lot more.',
+  'Diese KI-Funktion gibt es mit Pro.': 'This AI feature comes with Pro.', 'Anmelden': 'Sign in', 'Pro ansehen': 'See Pro'
+});
 
 /* ---------- Smart coach (USP): training-aware targets, weekly check-in, load suggestions ----------
    Strings in this file are written in both languages via L(de, en), so the DOM translator has nothing to do here. */
@@ -1102,7 +1116,7 @@ async function cloudPush() {
   cloud.busy = true; cloud.dirty = false; cloud.state = 'syncing'; paintCloud();
   try {
     await sbFetch('/rest/v1/user_state?on_conflict=user_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.user.id, data: S, updated_at: new Date(S.at || Date.now()).toISOString() }) });
-    markSynced(); cloud.state = 'ok';
+    markSynced(); cloud.state = 'ok'; setTimeout(uploadPending, 500);
   } catch (e) { cloud.dirty = true; cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; }
   finally { cloud.busy = false; paintCloud(); if (cloud.dirty && cloud.state === 'ok') cloudSchedule(); }
 }
@@ -1126,9 +1140,10 @@ async function cloudSync(first) {
   let remote; try { remote = await cloudPull(); } catch (e) { cloud.state = e.code === 'auth' && !AUTH ? 'out' : 'error'; paintCloud(); return; }
   const meta = lsGet(SYNC_KEY), known = meta && meta.uid === AUTH.user.id, localHas = !!(S && S.profile), remoteHas = !!(remote && remote.profile);
   if (!remoteHas && !localHas) { cloud.state = 'ok'; markSynced(); paintCloud(); return; }
-  if (remoteHas && !localHas) { adoptRemote(remote); cloud.state = 'ok'; if (first) toast(L('Angemeldet. Deine Daten sind geladen.', 'Signed in. Your data is loaded.')); return; }
-  if (!remoteHas && localHas) { await cloudPush(); if (first) toast(L('Angemeldet. Deine Daten sind jetzt gesichert.', 'Signed in. Your data is now backed up.')); return; }
+  if (remoteHas && !localHas) { adoptRemote(remote); cloud.state = 'ok'; setTimeout(refreshPro, 300); if (first) toast(L('Angemeldet. Deine Daten sind geladen.', 'Signed in. Your data is loaded.')); return; }
+  if (!remoteHas && localHas) { setTimeout(refreshPro, 300); await cloudPush(); if (first) toast(L('Angemeldet. Deine Daten sind jetzt gesichert.', 'Signed in. Your data is now backed up.')); return; }
   if (!known) { cloud.state = 'idle'; paintCloud(); conflictSheet(remote); return; }
+  setTimeout(refreshPro, 300);
   if ((remote.at || 0) > (S.at || 0)) { adoptRemote(remote); cloud.state = 'ok'; paintCloud(); }
   else if ((S.at || 0) > (remote.at || 0)) await cloudPush();
   else { cloud.state = 'ok'; markSynced(); paintCloud(); }
@@ -1222,15 +1237,16 @@ async function signOut() {
   if (cloud.dirty) { if (!await confirmBox(L('Nicht alles gesichert', 'Not everything is backed up'), L('Die letzten Änderungen konnten nicht hochgeladen werden. Trotzdem abmelden?', 'Your latest changes couldn’t be uploaded. Sign out anyway?'), L('Abmelden', 'Sign out'), true)) return; }
   try { await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {}
   setAuth(null); lsSet(SYNC_KEY, null); cloud = Object.assign(cloud, { state: 'out', at: 0, dirty: false });
-  const lang = S.lang; S = blank(); S.lang = lang; try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
+  clearLocalPhotos(); const lang = S.lang; S = blank(); S.lang = lang; try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
   applyDesign(); view = 'home'; render(); toast(L('Abgemeldet', 'Signed out'));
 }
 async function deleteAccount() {
   if (!await confirmBox(L('Konto endgültig löschen?', 'Delete your account for good?'), L('Dein Konto und alle gespeicherten Daten werden gelöscht, in der Cloud und auf diesem Gerät. Das lässt sich nicht rückgängig machen. Exportiere vorher deine Daten, wenn du sie behalten willst.', 'Your account and all saved data will be deleted, in the cloud and on this device. This can’t be undone. Export your data first if you want to keep it.'), L('Konto löschen', 'Delete account'), true)) return;
+  await deleteAllCloudPhotos();
   try { await sbFetch('/rest/v1/rpc/delete_user', { method: 'POST', body: '{}' }); }
   catch (e) { toast(cloudErr(e) || L('Löschen hat nicht geklappt. Versuch es noch mal.', 'Deleting didn’t work. Try again.')); return; }
   setAuth(null); lsSet(SYNC_KEY, null); cloud = Object.assign(cloud, { state: 'out', at: 0, dirty: false });
-  S = blank(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
+  clearLocalPhotos(); S = blank(); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
   applyDesign(); view = 'home'; render(); toast(L('Konto gelöscht', 'Account deleted'));
 }
 document.addEventListener('click', e => {
@@ -1307,6 +1323,65 @@ document.addEventListener('input', e => {
   if (e.target.id !== 'pq') return;
   clearTimeout(peopleTimer); const v = e.target.value.trim();
   peopleTimer = setTimeout(async () => { peopleQ = v; await loadPeople(); render(); const i = document.getElementById('pq'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (er) {} } }, 350);
+});
+
+/* ---------- Server features (AI login, payments) ---------- */
+let SRV = lsGet('repwerk-srv') || {};
+function setSRV(j) { SRV = { ai: !!j.ai, aiLogin: !!j.aiLogin, pay: !!j.pay, trialDays: j.trialDays || 0 }; lsSet('repwerk-srv', SRV); }
+const payOn = () => !IN_CLAUDE && !!SRV.pay;
+async function authHeaders() { const h = { 'content-type': 'application/json' }; if (loggedIn()) { const t = await accessToken(); if (t) h.Authorization = 'Bearer ' + t; } return h; }
+
+/* Pro status comes from public.entitlements, which only the Stripe webhook writes */
+async function refreshPro() {
+  if (!payOn()) return;
+  if (!loggedIn()) { if (S.pro) { S.pro = false; save(); render(); } return; }
+  let rows; try { rows = await sbFetch('/rest/v1/entitlements?select=pro_until,status', { method: 'GET' }); } catch (e) { return; }
+  const r = rows && rows[0], until = r && r.pro_until ? new Date(r.pro_until).getTime() : 0, pro = until > Date.now();
+  if (pro !== !!S.pro || S.proUntil !== until || S.proStatus !== (r && r.status)) { S.pro = pro; S.proUntil = until; S.proStatus = r ? r.status : ''; save(); render(); }
+  return pro;
+}
+async function buyPro(plan) {
+  if (!loggedIn()) { closeSheet(); loginSheet(); toast(L('Melde dich zuerst an, damit Pro mit deinem Konto verknüpft ist', 'Sign in first so Pro is linked to your account')); return; }
+  toast(L('Öffne die sichere Zahlung …', 'Opening secure checkout …'));
+  let r, j; try { r = await fetch('api/checkout', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ plan }) }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  if (r.ok && j.url) { location.href = j.url; return; }
+  if (j.code === 'already_pro') { await refreshPro(); closeSheet(); toast(L('Du hast Pro schon', 'You already have Pro')); return; }
+  if (j.code === 'login') { loginSheet(); return; }
+  toast(L('Die Zahlung konnte nicht gestartet werden. Versuch es später noch mal.', 'Couldn’t start the payment. Please try again later.'));
+}
+async function openPortal() {
+  let r, j; try { r = await fetch('api/portal', { method: 'POST', headers: await authHeaders(), body: '{}' }); j = await r.json().catch(() => ({})); } catch (e) { toast(L('Keine Verbindung', 'No connection')); return; }
+  if (r.ok && j.url) location.href = j.url; else toast(L('Die Abo-Verwaltung ist gerade nicht erreichbar.', 'Subscription management isn’t available right now.'));
+}
+function payButtonsHTML() {
+  const trial = SRV.trialDays ? L(`${SRV.trialDays} Tage gratis testen, danach `, `${SRV.trialDays}-day free trial, then `) : '';
+  return `<button class="card row" data-cl="buy:year" style="border-color:var(--ember);background:var(--ember-soft);text-align:left;width:100%"><div class="grow"><div style="font-weight:700">${L('Jährlich', 'Yearly')}</div><div class="cap">${trial}${L('59,99 € pro Jahr · entspricht 5,00 € im Monat', '€59.99 per year · €5.00 a month')}</div></div><span class="tag ember">−44 %</span></button>
+    <button class="card row" data-cl="buy:month" style="text-align:left;width:100%"><div class="grow"><div style="font-weight:700">${L('Monatlich', 'Monthly')}</div><div class="cap">${trial}${L('8,99 € pro Monat', '€8.99 per month')}</div></div>${ic('next', 18)}</button>
+    <p class="cap" style="margin:0;text-align:center">${L('Sichere Zahlung über Stripe. Jederzeit kündbar, verwalten in Einstellungen → Abo.', 'Secure payment via Stripe. Cancel any time in Settings → Subscription.')}${loggedIn() ? '' : ' ' + L('Zum Kaufen meldest du dich an.', 'You’ll sign in to buy.')}</p>`;
+}
+function aboCardHTML() {
+  if (!payOn()) return null;
+  const until = S.proUntil ? new Date(S.proUntil - (S.proStatus === 'active' || S.proStatus === 'trialing' || S.proStatus === 'past_due' ? 2 * 864e5 : 0)).toLocaleDateString(LOC(), { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const sub = S.pro ? (S.proStatus === 'trialing' ? L(`Pro · Testphase bis ${until}`, `Pro · trial until ${until}`) : S.proStatus === 'canceled' || S.proStatus === 'past_due' ? L(`Pro bis ${until}`, `Pro until ${until}`) : L(`Pro · verlängert sich am ${until}`, `Pro · renews on ${until}`)) : L('Free · mit Werbebannern', 'Free · with ad banners');
+  return `<div class="card"><div class="row" style="justify-content:space-between;gap:10px"><div><div class="lbl">${L('Abo', 'Subscription')}</div><div class="cap">${sub}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-cl="portal">${L('Verwalten', 'Manage')}</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">${L('Pro holen', 'Get Pro')}</button>`}</div></div>`;
+}
+function handleProReturn() {
+  const v = new URLSearchParams(location.search).get('pro'); if (!v) return;
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (v === 'cancel') { toast(L('Kauf abgebrochen. Es wurde nichts berechnet.', 'Purchase cancelled. You weren’t charged.')); return; }
+  if (v === 'portal') { refreshPro(); return; }
+  if (v === 'ok') {
+    toast(L('Zahlung erfolgreich. Pro wird freigeschaltet …', 'Payment successful. Activating Pro …'));
+    let n = 0; const poll = async () => { if (await refreshPro()) { toast(L('Willkommen bei Pro!', 'Welcome to Pro!')); return; } if (++n < 15) setTimeout(poll, 2000); else toast(L('Pro wird gleich aktiv. Öffne die App in ein paar Minuten neu.', 'Pro will be active shortly. Reopen the app in a few minutes.')); };
+    setTimeout(poll, 1500);
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-cl]'); if (!b || !S) return;
+  const [a, v] = b.dataset.cl.split(':');
+  if (a === 'buy') buyPro(v);
+  else if (a === 'portal') openPortal();
+  else if (a === 'paywall') { closeSheet(); paywall(); }
 });
 
 /* ---------- Barcode scanner + Open Food Facts ----------
@@ -1545,6 +1620,124 @@ function ownFoodSheet(pre, onPick, hint) {
 /* Online search in Open Food Facts, used by the food search sheet */
 async function offSearch(q) { const r = await offFetch('q', q); return (r.products || []).map(offToFood).filter(f => f.complete && f.code); }
 
+/* ---------- Workout photos ----------
+   A workout keeps only references: w.photos = [{ id, url? }]. The image itself lives in IndexedDB on this device
+   (key = id) and, when signed in, in the Supabase Storage bucket "workout-photos" at <user id>/<photo id>.jpg (url).
+   <img data-ph="id"> without src is filled in automatically from IndexedDB. Strings bilingual via L(de, en). */
+const MAX_PHOTOS = 6, PH_BUCKET = 'workout-photos';
+let idbP = null;
+function idb() {
+  if (!idbP) idbP = new Promise((res, rej) => { try { const r = indexedDB.open('repwerk-media', 1); r.onupgradeneeded = () => r.result.createObjectStore('photos'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
+  return idbP;
+}
+async function idbDo(mode, fn) { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction('photos', mode), st = tx.objectStore('photos'), rq = fn(st); tx.oncomplete = () => res(rq && rq.result); tx.onerror = () => rej(tx.error); }); }
+const idbPut = (id, blob) => idbDo('readwrite', st => st.put(blob, id));
+const idbGet = id => idbDo('readonly', st => st.get(id)).catch(() => null);
+const idbDel = id => idbDo('readwrite', st => st.delete(id)).catch(() => {});
+
+async function photoBlob(file, max = 1600, q = 0.82) {
+  const bmp = await createImageBitmap(file).catch(async () => { const u = URL.createObjectURL(file); try { const i = new Image(); i.src = u; await i.decode(); return i; } finally { setTimeout(() => URL.revokeObjectURL(u), 1000); } });
+  const w = bmp.width, h = bmp.height, k = Math.min(1, max / Math.max(w, h)), c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(h * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode')), 'image/jpeg', q));
+}
+/* Turn picked files into photo refs (stored locally right away, uploaded in the background) */
+async function addPhotoFiles(files, list) {
+  let added = 0;
+  for (const f of [...files]) {
+    if (list.length >= MAX_PHOTOS) { toast(L(`Höchstens ${MAX_PHOTOS} Fotos pro Training`, `At most ${MAX_PHOTOS} photos per workout`)); break; }
+    if (!/^image\//.test(f.type || 'image/')) continue;
+    try { const b = await photoBlob(f), id = 'ph' + uid(); await idbPut(id, b); list.push({ id }); added++; }
+    catch (e) { toast(L('Ein Bild konnte nicht geladen werden', 'An image couldn’t be loaded')); }
+  }
+  if (added) uploadPending();
+  return added;
+}
+const phSrc = p => typeof p === 'string' ? p : (p && p.url) || '';
+const photosOf = w => w ? (Array.isArray(w.photos) ? w.photos : w.photo ? [w.photo] : []) : [];
+function photoStrip(list, opts = {}) {
+  if (!list.length) return '';
+  return `<div class="phstrip ${opts.edit ? 'edit' : ''}">${list.map((p, i) => `<div class="ph"><img ${phSrc(p) ? `src="${esc(phSrc(p))}" loading="lazy"` : `data-ph="${esc(p.id)}"`} alt="${L('Trainingsfoto', 'Workout photo')} ${i + 1}" data-viewph="${i}">${opts.edit ? `<button class="phx" data-rmph="${i}" aria-label="${L('Foto entfernen', 'Remove photo')}">${ic('x', 16)}</button>` : ''}</div>`).join('')}</div>`;
+}
+function photoAddBtn(list, attr = 'data-addph') {
+  if (list.length >= MAX_PHOTOS) return '';
+  return `<label class="btn btn-s btn-block">${ic('img', 20)} ${list.length ? L('Weitere Fotos hinzufügen', 'Add more photos') : L('Fotos hinzufügen', 'Add photos')}<input type="file" accept="image/*" multiple class="hidden" ${attr}></label>`;
+}
+/* Fill <img data-ph> from IndexedDB */
+const phUrls = new Map();
+async function hydratePhotos(root = document) {
+  for (const img of root.querySelectorAll('img[data-ph]:not([src])')) {
+    const id = img.dataset.ph; let u = phUrls.get(id);
+    if (!u) { const b = await idbGet(id); if (b) { u = URL.createObjectURL(b); phUrls.set(id, u); } }
+    if (u) img.src = u; else { img.removeAttribute('data-ph'); img.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect width="4" height="3" fill="#888" opacity=".25"/></svg>'); img.title = L('Foto liegt auf einem anderen Gerät', 'Photo is on another device'); }
+  }
+}
+new MutationObserver(() => { if (document.querySelector('img[data-ph]:not([src])')) hydratePhotos(); }).observe(document.documentElement, { childList: true, subtree: true });
+function viewPhoto(src) { openSheet(`<img class="phfull" src="${esc(src)}" alt="${L('Trainingsfoto', 'Workout photo')}"><button class="btn btn-s btn-block" data-close-sheet>${L('Schließen', 'Close')}</button>`); }
+document.addEventListener('click', e => { const im = e.target.closest('img[data-viewph]'); if (im && im.src && !im.closest('.phstrip.edit')) { e.stopPropagation(); e.preventDefault(); viewPhoto(im.src); } }, true);
+/* Photos during a running workout */
+document.addEventListener('change', async e => { if (!e.target.matches('[data-wph]') || !S.active) return; S.active.photos = S.active.photos || []; if (await addPhotoFiles(e.target.files, S.active.photos)) { save(); render(); } });
+document.addEventListener('click', e => { const b = e.target.closest('#wph [data-rmph]'); if (!b || !S.active) return; const [p] = S.active.photos.splice(+b.dataset.rmph, 1); deletePhotos([p]); save(); render(); });
+async function clearLocalPhotos() { try { const db = await idbP; if (db) db.close(); } catch (e) {} idbP = null; phUrls.forEach(u => URL.revokeObjectURL(u)); phUrls.clear(); try { indexedDB.deleteDatabase('repwerk-media'); } catch (e) {} }
+
+/* ---------- Cloud storage ---------- */
+const phPath = id => `${AUTH.user.id}/${id}.jpg`;
+async function uploadPhoto(p) {
+  const b = await idbGet(p.id); if (!b) return false;
+  const tok = await accessToken(); if (!tok) return false;
+  const r = await fetch(`${SB.url}/storage/v1/object/${PH_BUCKET}/${phPath(p.id)}`, { method: 'POST', headers: { apikey: SB.key, Authorization: 'Bearer ' + tok, 'Content-Type': 'image/jpeg', 'x-upsert': 'true', 'cache-control': '31536000' }, body: b }).catch(() => null);
+  if (!r || !r.ok) return false;
+  p.url = `${SB.url}/storage/v1/object/public/${PH_BUCKET}/${phPath(p.id)}`; return true;
+}
+let uploading = null;
+function uploadPending() {
+  if (!loggedIn() || IN_CLAUDE) return Promise.resolve();
+  if (uploading) return uploading;
+  uploading = (async () => {
+    let changed = false;
+    const lists = [...S.workouts.map(photosOf), S.active ? (S.active.photos || []) : []];
+    for (const l of lists) for (const p of l) if (p && typeof p === 'object' && !p.url) { if (await uploadPhoto(p)) changed = true; }
+    if (changed) save();
+  })().finally(() => { uploading = null; });
+  return uploading;
+}
+async function deletePhotos(list) {
+  const own = list.filter(p => p && typeof p === 'object');
+  own.forEach(p => { idbDel(p.id); const u = phUrls.get(p.id); if (u) { URL.revokeObjectURL(u); phUrls.delete(p.id); } });
+  const paths = own.filter(p => p.url && loggedIn() && p.url.includes(`/${AUTH.user.id}/`)).map(p => phPath(p.id));
+  if (paths.length) try { await sbFetch(`/storage/v1/object/${PH_BUCKET}`, { method: 'DELETE', body: JSON.stringify({ prefixes: paths }) }); } catch (e) {}
+}
+async function deleteAllCloudPhotos() {
+  if (!loggedIn()) return;
+  for (let round = 0; round < 20; round++) {
+    let items; try { items = await sbFetch(`/storage/v1/object/list/${PH_BUCKET}`, { method: 'POST', body: JSON.stringify({ prefix: AUTH.user.id, limit: 1000, offset: 0 }) }); } catch (e) { return; }
+    if (!items || !items.length) return;
+    try { await sbFetch(`/storage/v1/object/${PH_BUCKET}`, { method: 'DELETE', body: JSON.stringify({ prefixes: items.map(i => `${AUTH.user.id}/${i.name}`) }) }); } catch (e) { return; }
+  }
+}
+/* What goes into a shared post */
+async function postPhotos(list) {
+  if (CB && CB.kind === 'supabase') { await Promise.race([uploadPending(), new Promise(r => setTimeout(r, 15000))]); return { photos: list.filter(p => p && p.url).map(p => p.url) }; }
+  const first = list[0]; if (!first) return { photo: '' };
+  if (typeof first === 'string') return { photo: first };
+  const b = await idbGet(first.id); if (!b) return { photo: '' };
+  try { return { photo: await compressImage(b, 900, 0.72) }; } catch (e) { return { photo: '' }; }
+}
+/* Edit the photos of a saved workout */
+function editPhotosSheet(w) {
+  w.photos = photosOf(w).filter(p => typeof p === 'object');
+  const draw = sh => { sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">${L('Fotos', 'Photos')}</h2><button class="iconbtn" data-close-sheet aria-label="${L('Schließen', 'Close')}">${ic('x')}</button></div>
+    ${w.photos.length ? photoStrip(w.photos, { edit: true }) : `<p class="muted" style="margin:0">${L('Noch keine Fotos. Halte Fortschritt, Pump oder dein Gym fest.', 'No photos yet. Capture progress, the pump or your gym.')}</p>`}
+    ${photoAddBtn(w.photos)}
+    <p class="cap" style="margin:0">${loggedIn() ? (w.posted ? L('Das Training ist geteilt: Freunde sehen die Fotos im Feed.', 'This workout is shared: friends see the photos in the feed.') : L('Fotos werden in deinem Konto gesichert. Sichtbar für andere nur, wenn du das Training teilst.', 'Photos are backed up to your account. Others only see them if you share the workout.')) : L('Fotos bleiben auf diesem Gerät. Mit einem Konto werden sie gesichert.', 'Photos stay on this device. With an account they’re backed up.')}</p>
+    <button class="btn btn-p btn-block" data-close-sheet>${L('Fertig', 'Done')}</button>`; };
+  const sync = async () => { save(); render(); if (w.posted && CB) { try { await uploadPending(); await CB.updatePost(w.id, await postPhotos(w.photos)); feed = null; } catch (e) {} } };
+  openSheet('', sh => { draw(sh);
+    sh.addEventListener('change', async ev => { if (!ev.target.matches('[data-addph]')) return; const n = await addPhotoFiles(ev.target.files, w.photos); if (n) { draw(sh); sync(); } });
+    sh.addEventListener('click', async ev => { const b = ev.target.closest('[data-rmph]'); if (!b) return; ev.stopPropagation(); const [p] = w.photos.splice(+b.dataset.rmph, 1); draw(sh); deletePhotos([p]); sync(); });
+  });
+}
+
 /* Repwerk Fitness prototype v2 */
 const I = {
   home:'<path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/>',
@@ -1616,8 +1809,9 @@ const aiOffText = () => IN_CLAUDE ? 'Die KI funktioniert, wenn du den Prototyp i
 // Standalone: the AI runs through our own server function (/api/ai). Same interface as Claude's sample capability.
 function apiError(code) { const e = new Error(code); e.code = code; return e; }
 async function apiCall(body) {
+  if (SRV.aiLogin && !loggedIn()) throw apiError('login');
   let r;
-  try { r = await fetch('api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
+  try { r = await fetch('api/ai', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(body) }); } catch (e) { throw apiError('network'); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw apiError(j.code || (r.status === 429 ? 'rate_limited' : 'server'));
   return j;
@@ -1628,7 +1822,7 @@ function makeApiSample() {
   fn.json = async (input, opts = {}) => {
     const images = [];
     for (const b of (opts.images || [])) { let url; try { url = await compressImage(b, 1280, 0.8); } catch (e) { url = await blobToDataUrl(b); } images.push(url); }
-    const j = await apiCall({ prompt: input, images, json: true });
+    const j = await apiCall({ prompt: input, images, json: true, kind: opts.kind });
     if (!j.json) throw apiError('invalid_json');
     return j.json;
   };
@@ -1636,7 +1830,7 @@ function makeApiSample() {
   return fn;
 }
 async function connectApi() {
-  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) setSB(j.supabase); render(); if (loggedIn()) cloudSync(false); handleInviteParam(); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
+  try { const r = await fetch('api/health', { cache: 'no-store' }); const j = await r.json(); if (j && j.ai) { sampleFn = makeApiSample(); sampleImages = true; } if (j) { setSB(j.supabase); setSRV(j); } render(); if (loggedIn()) cloudSync(false); else refreshPro(); handleInviteParam(); handleProReturn(); } catch (e) { /* offline or no server function: AI stays off, cached cloud config stays */ if (loggedIn()) cloudSync(false); }
 }
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S && S.profile && view === 'home') render(); });
@@ -1719,7 +1913,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appl
 /* ---------- Claude ---------- */
 let sampleFn = null, sampleImages = false;
 async function connectSample() { try { sampleFn = await claude.use('sample'); if (sampleFn) { const l = await sampleFn.limits().catch(() => null); sampleImages = !!(l && l.images); } } catch (e) { sampleFn = null; } render(); }
-const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
+const errText = e => ({ not_granted: 'Die KI wurde für diese Seite nicht erlaubt.', rate_limited: 'Gerade zu viele Anfragen. Versuch es gleich noch einmal.', image_rejected: 'Dieses Bild konnte nicht gelesen werden. Nimm ein anderes Foto (JPG oder PNG).', refused: 'Die KI konnte das nicht auswerten.', invalid_json: 'Die Antwort war unvollständig. Versuch es noch einmal.', images_unavailable: 'Fotoanalyse ist in dieser Ansicht nicht verfügbar. Nutze die Text-Eingabe.', session_expired: 'Bitte melde dich bei Claude neu an.', network: 'Keine Internetverbindung. Versuch es gleich noch einmal.', server: 'Der Server hat nicht geantwortet. Versuch es gleich noch einmal.', ai_off: 'Die KI ist in dieser Version noch nicht eingerichtet.', login: 'Melde dich an, um die KI zu nutzen. So bleibt sie für alle schnell und fair.', limit: 'Dein Limit für diese KI-Funktion ist für heute erreicht. Mit Pro hast du deutlich mehr.', pro: 'Diese KI-Funktion gibt es mit Pro.' }[e && e.code] || 'Das hat nicht geklappt. Versuch es noch einmal.');
 const ALLERGENS = { laktose: 'Laktose', gluten: 'Gluten', nuesse: 'Nüsse', ei: 'Ei', fisch: 'Fisch', soja: 'Soja' };
 const DIETS = { alles: 'Alles', vegetarisch: 'Vegetarisch', vegan: 'Vegan', pescetarisch: 'Pescetarisch' };
 function foodPrompt() {
@@ -2219,6 +2413,7 @@ function vWorkout() {
       <button class="btn btn-s btn-block" style="height:40px;margin-top:8px" data-addset="${xi}">+ Satz hinzufügen</button></div>`; }).join('')}
     <div class="cap" style="text-align:center">Tippe auf die Satznummer für <b style="color:var(--warning)">W</b> Aufwärmen, <b style="color:#8B6CFF">D</b> Dropsatz oder <b style="color:var(--critical)">F</b> bis zum Versagen. ${infoBtn('sets')}</div>
     <button class="btn btn-p btn-block" data-act="wraddex">${ic('plus', 20)} Übung hinzufügen</button>
+    <div id="wph" style="display:flex;flex-direction:column;gap:10px">${photoStrip(a.photos || [], { edit: true })}${photoAddBtn(a.photos || [], 'data-wph')}</div>
     <button class="btn btn-d btn-block" data-act="cancelworkout">Training verwerfen</button>`;
 }
 function setTypeSheet(xs, xi, si, after) {
@@ -2245,7 +2440,8 @@ function finishWorkout() {
   const a = S.active, done = doneCount(a);
   if (!done) { confirmBox('Noch keine Sätze erledigt', 'Hake mindestens einen Satz ab oder verwirf das Training.', 'Okay'); return; }
   const fresh = !a.routineId;
-  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', photo: '', share: !!CB, asRoutine: fresh };
+  a.photos = a.photos || [];
+  const d = { min: Math.max(1, Math.round(elapsed(a) / 60000)), name: a.name, gym: S.gyms[0] || '', note: '', share: !!CB, asRoutine: fresh };
   const draw = sh => {
     sh.innerHTML = `<div class="grab"></div><div class="row" style="justify-content:space-between"><h2 class="disp">Training speichern</h2><button class="iconbtn" data-close-sheet aria-label="Zurück zum Training">${ic('x')}</button></div>
       <input class="input" id="f-name" value="${esc(d.name)}" aria-label="Titel" style="font-weight:700">
@@ -2254,18 +2450,18 @@ function finishWorkout() {
         ${S.gyms.length ? `<div class="chips">${S.gyms.slice(0, 4).map(g => `<button class="chip ${d.gym === g ? 'on' : ''}" data-gym="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
         <span class="cap">In der App schlagen wir Studios in deiner Nähe über den Standort vor, nur wenn du es erlaubst. Im Prototyp merken wir uns deine Gyms.</span></label>
       <label class="field"><span class="lbl">Notiz</span><textarea class="input" id="f-note" placeholder="Wie lief es? Neue Technik, Schmerzen, Stimmung …">${esc(d.note)}</textarea></label>
-      <div class="field"><span class="lbl">Foto</span>${d.photo ? `<img class="photo" src="${d.photo}" alt="Dein Trainingsfoto"><button class="btn btn-g" data-nophoto>Foto entfernen</button>` : `<label class="btn btn-s btn-block">${ic('img', 20)} Foto hinzufügen<input type="file" accept="image/*" class="hidden" data-fphoto></label>`}</div>
-      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${CB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Foto.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Melde dich an, um Workouts zu teilen.')}</div></div><button class="toggle ${d.share && CB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && CB)}" ${CB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
+      <div class="field"><span class="lbl">Fotos</span>${photoStrip(a.photos, { edit: true })}${photoAddBtn(a.photos, 'data-fphoto')}</div>
+      <div class="sel"><div class="grow"><div style="font-weight:600">In der Community teilen</div><div class="cap">${CB ? 'Freunde, die dir folgen, sehen Titel, Gym, Übungen, Sätze, Notiz und Fotos.' : (IN_CLAUDE ? 'Teilen geht, wenn du den Prototyp in Claude öffnest.' : 'Melde dich an, um Workouts zu teilen.')}</div></div><button class="toggle ${d.share && CB ? 'on' : ''}" data-ftog="share" role="switch" aria-checked="${!!(d.share && CB)}" ${CB ? '' : 'disabled'} aria-label="In der Community teilen"></button></div>
       ${fresh ? `<div class="sel"><div class="grow"><div style="font-weight:600">Als Routine speichern</div><div class="cap">Übungen und Sätze als Vorlage für das nächste Mal.</div></div><button class="toggle ${d.asRoutine ? 'on' : ''}" data-ftog="asRoutine" role="switch" aria-checked="${d.asRoutine}" aria-label="Als Routine speichern"></button></div>` : ''}
       <button class="btn btn-p btn-block" data-fsave>Speichern</button>`;
   };
   openSheet('', sh => {
     draw(sh);
     const read = () => { d.min = Math.max(1, Math.min(600, Math.round(num(sh.querySelector('#f-dur').value)) || d.min)); d.name = sh.querySelector('#f-name').value.trim() || a.name; d.gym = sh.querySelector('#f-gym').value.trim(); d.note = sh.querySelector('#f-note').value.trim(); };
-    sh.addEventListener('change', async ev => { if (ev.target.matches('[data-fphoto]') && ev.target.files[0]) { read(); try { d.photo = await compressImage(ev.target.files[0], 900, 0.72); } catch (e) { toast('Dieses Bild konnte nicht geladen werden'); } draw(sh); } });
+    sh.addEventListener('change', async ev => { if (ev.target.matches('[data-fphoto]') && ev.target.files.length) { read(); if (await addPhotoFiles(ev.target.files, a.photos)) save(); draw(sh); } });
     sh.addEventListener('click', async ev => {
       const g = ev.target.closest('[data-gym]'); if (g) { read(); d.gym = g.dataset.gym; draw(sh); return; }
-      if (ev.target.closest('[data-nophoto]')) { read(); d.photo = ''; draw(sh); return; }
+      const rm = ev.target.closest('[data-rmph]'); if (rm) { ev.stopPropagation(); read(); const [ph] = a.photos.splice(+rm.dataset.rmph, 1); deletePhotos([ph]); save(); draw(sh); return; }
       const tg = ev.target.closest('[data-ftog]'); if (tg && !tg.disabled) { read(); d[tg.dataset.ftog] = !d[tg.dataset.ftog]; draw(sh); return; }
       if (!ev.target.closest('[data-fsave]')) return;
       read(); ev.target.closest('[data-fsave]').disabled = true;
@@ -2277,7 +2473,7 @@ function finishWorkout() {
       if (d.asRoutine && fresh) S.routines.push({ id: uid(), name: d.name, exercises: a.exercises.map(x => ({ exId: x.exId, rest: x.rest, note: x.note, sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) });
       if (a.routineId && a.routineId.startsWith('plan-')) S.planIndex++;
       let posted = false;
-      if (d.share && CB) { try { await postWorkout(a, d.photo); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
+      if (d.share && CB) { try { await postWorkout(a); posted = true; a.posted = true; } catch (e) { toast('Teilen hat nicht geklappt, Training ist trotzdem gespeichert'); } }
       S.workouts.push(a); S.active = null; stopRest(); save(); closeSheet(); view = 'train'; render(); feed = null;
       summarySheet(a, posted, streakBefore);
     });
@@ -2315,7 +2511,7 @@ function summarySheet(a, posted, streakBefore) {
 function workoutDetailHTML(w, opts = {}) {
   const exs = w.exercises || [];
   return `${opts.head || ''}<div><div class="cap">${new Date(w.start).toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long' })}${w.gym ? ' · ' + esc(w.gym) : ''}</div><h2 class="disp">${esc(w.name)}</h2></div>
-    ${w.photo ? `<img class="photo" src="${esc(w.photo)}" alt="Trainingsfoto">` : ''}
+    ${photoStrip(photosOf(w))}
     ${w.note ? `<p translate="no" style="margin:0;white-space:pre-wrap">${esc(w.note)}</p>` : ''}
     <div class="card stats3" style="padding:12px 14px"><div><span class="cap">Dauer</span><span class="disp" style="font-size:18px">${dur(wDur(w))}</span></div><div><span class="cap">Volumen</span><span class="disp" style="font-size:18px">${fmt(w.volume ?? volume(w))} kg</span></div><div><span class="cap">Sätze</span><span class="disp" style="font-size:18px">${w.sets ?? doneCount(w)}</span></div></div>
     ${(w.prs || []).length ? `<div class="banner" style="background:color-mix(in srgb, var(--good) 16%, transparent)"><span style="color:var(--good)">${ic('trophy', 20)}</span><div><b>Rekorde:</b> ${w.prs.map(esc).join(', ')}</div></div>` : ''}
@@ -2323,21 +2519,22 @@ function workoutDetailHTML(w, opts = {}) {
 }
 function workoutDetail(id) {
   const w = S.workouts.find(x => x.id === id); if (!w) return;
-  openSheet(workoutDetailHTML(w) + `<div class="grid2"><button class="btn btn-s" data-wd="sum">${ic('stats', 18)} Zusammenfassung</button><button class="btn btn-s" data-wd="time">${ic('timer', 18)} Dauer ändern</button></div><div class="grid2"><button class="btn btn-s" data-wd="routine">Als Routine speichern</button><button class="btn btn-d" data-wd="del">Löschen</button></div>`, sh => sh.addEventListener('click', async ev => {
+  openSheet(workoutDetailHTML(w) + `<button class="btn btn-s btn-block" data-wd="photos">${ic('img', 18)} ${photosOf(w).length ? 'Fotos bearbeiten' : 'Fotos hinzufügen'}</button><div class="grid2"><button class="btn btn-s" data-wd="sum">${ic('stats', 18)} Zusammenfassung</button><button class="btn btn-s" data-wd="time">${ic('timer', 18)} Dauer ändern</button></div><div class="grid2"><button class="btn btn-s" data-wd="routine">Als Routine speichern</button><button class="btn btn-d" data-wd="del">Löschen</button></div>`, sh => sh.addEventListener('click', async ev => {
     const b = ev.target.closest('[data-wd]'); if (!b) return;
     if (b.dataset.wd === 'time') { closeSheet(); editTimeSheet(w); return; }
+    if (b.dataset.wd === 'photos') { editPhotosSheet(w); return; }
     if (b.dataset.wd === 'sum') { closeSheet(); summarySheet(w, w.posted, weekStreak()); return; }
     if (b.dataset.wd === 'routine') { S.routines.push({ id: uid(), name: w.name, exercises: w.exercises.map(x => ({ exId: x.exId, rest: x.rest ?? 90, note: x.note || '', sets: x.sets.map(s => ({ type: s.type || 'n', kg: s.kg, reps: s.reps })) })) }); save(); closeSheet(); render(); toast('Als Routine gespeichert'); }
-    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); if (w.posted && CB) { try { await CB.deletePost(w.id); } catch (e) {} } save(); closeSheet(); render(); }
+    if (b.dataset.wd === 'del' && await confirmBox('Training löschen?', 'Das Training verschwindet aus deinem Verlauf und deinen Statistiken.', 'Löschen', true)) { S.workouts = S.workouts.filter(x => x.id !== w.id); deletePhotos(photosOf(w)); if (w.posted && CB) { try { await CB.deletePost(w.id); } catch (e) {} } save(); closeSheet(); render(); }
   }));
 }
 
 /* ---------- Community ---------- */
 async function publishProfile() { if (!CB || !UID) return; await CB.setProfile({ name: S.social.name || 'Ohne Namen', bio: S.social.bio || '', avatar: S.social.avatar || '', goal: S.profile ? GOALS[S.profile.goal] : '', at: Date.now() }); }
-async function postWorkout(a, photo) {
+async function postWorkout(a) {
   if (!S.social.name) S.social.name = S.profile.name || 'Ohne Namen';
   await publishProfile();
-  const post = { id: a.id, author: UID, name: a.name, gym: a.gym || '', note: a.note || '', photo: photo || '', start: a.start, end: a.end, dur: wDur(a), at: Date.now(), volume: r0(volume(a)), sets: doneCount(a), prs: a.prs || [],
+  const post = { id: a.id, author: UID, name: a.name, gym: a.gym || '', note: a.note || '', ...(await postPhotos(photosOf(a))), start: a.start, end: a.end, dur: wDur(a), at: Date.now(), volume: r0(volume(a)), sets: doneCount(a), prs: a.prs || [],
     exercises: a.exercises.map(x => ({ exId: x.exId, name: exOf(x.exId).name, note: x.note || '', sets: x.sets.map(s => ({ type: s.type, kg: s.kg, reps: s.reps })) })) };
   const json = JSON.stringify(post); if (json.length > 240000) post.photo = '';
   await CB.setPost(post);
@@ -2365,7 +2562,7 @@ function postCard(p) {
     <button data-post="${esc(p.author)}:${esc(p.id)}" style="border:0;background:transparent;padding:0;text-align:left;display:flex;flex-direction:column;gap:8px">
       <div style="font-weight:800;font-size:18px">${esc(p.name)}</div>${p.note ? `<div class="muted" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(p.note)}</div>` : ''}
       <div class="stats3" style="width:100%"><div><span class="cap">Dauer</span><b>${dur(wDur(p))}</b></div><div><span class="cap">Volumen</span><b>${fmt(p.volume)} kg</b></div><div><span class="cap">Sätze</span><b>${p.sets}</b></div></div>
-      ${p.photo ? `<img class="photo" src="${esc(p.photo)}" alt="Trainingsfoto von ${esc(p.who.name || '')}" loading="lazy">` : ''}
+      ${photoStrip(photosOf(p))}
       <div class="cap">${exs.slice(0, 4).map(x => `${x.sets.length} × ${esc(x.name)}`).join(' · ')}${exs.length > 4 ? ` · +${exs.length - 4} weitere` : ''}</div>
       ${(p.prs || []).length ? `<span class="tag" style="color:var(--good)">${ic('trophy', 14)} ${p.prs.length} Rekord${p.prs.length > 1 ? 'e' : ''}</span>` : ''}
     </button></div>`;
@@ -2477,7 +2674,7 @@ function vSettings() {
       <div class="field"><span class="cap">Ecken</span>${segm('corners', [['round','Rund'],['square','Kantig']], d.corners)}</div>
       <div class="field"><span class="cap">Kalorienring zeigt</span>${segm('ring', [['left','Übrig'],['eaten','Gegessen']], d.ring)}</div></div>
     <div class="card"><div class="lbl" style="margin-bottom:4px">Erinnerungen</div>${[['training','Training an Trainingstagen'],['meals','Mahlzeiten eintragen'],['water','Wasser trinken']].map(([k, l]) => `<div class="sel"><div class="grow">${l}</div><button class="toggle ${S.reminders[k] ? 'on' : ''}" data-rem="${k}" role="switch" aria-checked="${!!S.reminders[k]}" aria-label="${l}"></button></div>`).join('')}<div class="cap">Push-Mitteilungen kommen mit der App.</div></div>
-    <div class="card"><div class="row" style="justify-content:space-between"><div><div class="lbl">Abo</div><div class="cap">${S.pro ? 'Pro (Demo aktiv) · werbefrei' : 'Free · mit Werbebannern'}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-act="unpro">Zurück zu Free</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">Pro ansehen</button>`}</div></div>
+    ${aboCardHTML() || `<div class="card"><div class="row" style="justify-content:space-between"><div><div class="lbl">Abo</div><div class="cap">${S.pro ? 'Pro (Demo aktiv) · werbefrei' : 'Free · mit Werbebannern'}</div></div>${S.pro ? `<button class="btn btn-s btn-sm" data-act="unpro">Zurück zu Free</button>` : `<button class="btn btn-p btn-sm" data-act="paywall">Pro ansehen</button>`}</div></div>`}
     <div class="card"><div class="lbl">Datenschutz</div><ul class="steps muted" style="margin-top:6px">
       <li>Übungsvideos sind Animationen, die direkt im Prototyp laufen. Es werden keine Videos von YouTube oder anderen Anbietern geladen.</li>
       <li>Fotos gehen nur zur Analyse an die KI, wenn du sie auswählst, und werden dafür nicht gespeichert.</li>
@@ -2704,7 +2901,7 @@ async function onClick(e) {
     case 'finish': finishWorkout(); break;
     case 'pausew': { const w = S.active; if (!w) break; if (w.pausedAt) { w.pausedMs = (w.pausedMs || 0) + (Date.now() - w.pausedAt); w.pausedAt = null; toast('Training läuft weiter'); } else { w.pausedAt = Date.now(); stopRest(); toast('Training pausiert'); } save(); render(); break; }
     case 'wraddex': pickExercises(ids => { ids.forEach(id => { const n = newExEntry(id); n.sets.forEach(s => s.done = false); S.active.exercises.push(n); }); save(); render(); }); break;
-    case 'cancelworkout': if (await confirmBox('Training verwerfen?', 'Alle Sätze dieser Einheit werden gelöscht.', 'Verwerfen', true)) { S.active = null; stopRest(); save(); view = 'train'; render(); } break;
+    case 'cancelworkout': if (await confirmBox('Training verwerfen?', 'Alle Sätze dieser Einheit werden gelöscht.', 'Verwerfen', true)) { deletePhotos(S.active.photos || []); S.active = null; stopRest(); save(); view = 'train'; render(); } break;
     case 'newroutine': editRoutine(null); break;
     case 'raddex': readRoutine(); pickExercises(ids => { ids.forEach(id => R.exercises.push(newExEntry(id))); render(); }); break;
     case 'rcancel': R = null; view = 'train'; render(); break;
@@ -2721,7 +2918,7 @@ async function onClick(e) {
     case 'invite': if (!S.social.name) { editProfileSheet(); toast('Leg zuerst dein Profil an, damit Freunde dich erkennen'); } else { publishProfile().catch(() => {}); shareInvite(); } break;
     case 'reset': if (await confirmBox('Alle Daten löschen?', 'Profil, Mahlzeiten, Trainings, Routinen und Gewicht werden gelöscht. Geteilte Workouts entfernen wir aus der Community.', 'Löschen', true)) {
       if (CB && UID) { try { await CB.deleteAll(); } catch (er) {} }
-      S = blank(); save(); applyDesign(); view = 'home'; render(); } break;
+      if (loggedIn()) await deleteAllCloudPhotos(); clearLocalPhotos(); S = blank(); save(); applyDesign(); view = 'home'; render(); } break;
   }
 }
 function readRoutine() {
@@ -2886,7 +3083,7 @@ async function runAnalysis(src) {
     resultSheet({ title: res.title, items: res.items, water: res.water, note: res.note, url, slot: defaultSlot() });
   } catch (e) {
     if (e && e.code === 'cancelled') { closeSheet(); return; }
-    openSheet(`<h2 class="disp">Hat nicht geklappt</h2><p class="muted" style="margin:0">${esc(errText(e))}</p><div class="grid2"><button class="btn btn-s" data-r="search">Suchen</button><button class="btn btn-p" data-r="text">Beschreiben</button></div>`, sh => sh.addEventListener('click', ev => { const b = ev.target.closest('[data-r]'); if (!b) return; closeSheet(); b.dataset.r === 'search' ? searchSheet() : textFlow(); }));
+    openSheet(`<h2 class="disp">Hat nicht geklappt</h2><p class="muted" style="margin:0">${esc(errText(e))}</p>${e && e.code === 'login' ? '<button class="btn btn-p btn-block" data-cl="login">Anmelden</button>' : e && (e.code === 'limit' || e.code === 'pro') ? '<button class="btn btn-p btn-block" data-cl="paywall">Pro ansehen</button>' : ''}<div class="grid2"><button class="btn btn-s" data-r="search">Suchen</button><button class="btn btn-p" data-r="text">Beschreiben</button></div>`, sh => sh.addEventListener('click', ev => { const b = ev.target.closest('[data-r]'); if (!b) return; closeSheet(); b.dataset.r === 'search' ? searchSheet() : textFlow(); }));
   }
 }
 const XN = ['fib', 'sug', 'sat', 'salt', 'mufa', 'pufa', 'trans', 'chol', 'kal', 'ca', 'fe', 'va', 'vc'];
@@ -3025,7 +3222,7 @@ Antworte NUR mit JSON in dieser Form:
 "prep":[{"day":"${days[0].wd}","recipes":["r2","r3"],"minutes":90,"steps":["Reis für 4 Portionen kochen"]}],
 "shopping":[{"item":"Hähnchenbrust","amount":"1,2 kg","category":"Fleisch & Fisch"}]}
 Regeln: kcal und Makros gelten pro Portion für eine Person. portions = wie oft das Rezept im Plan gegessen wird. ingredients gelten für alle portions einer Person, höchstens 10 Zutaten. steps höchstens 5 kurze Sätze. days enthält genau ${days.length} Einträge mit je ${slots.length} meals. prep ist leer, wenn kein Meal Prep. visual.style ist einer von plate, bowl, box, wrap, glass, pan (box für Meal-Prep-Gerichte); visual.colors sind 3 bis 5 echte Farben der Hauptzutaten als Hex. shopping.category ist einer von: ${SHOP_CAT.join(', ')}. Keine medizinischen Ratschläge.`;
-  const out = await sampleFn.json(prompt, { cache: false });
+  const out = await sampleFn.json(prompt, IN_CLAUDE ? { cache: false } : { cache: false, kind: 'mealplan' });
   const recipes = (Array.isArray(out && out.recipes) ? out.recipes : []).slice(0, 20).map((r, i) => ({ id: String(r.id || 'r' + i), name: String(r.name || 'Gericht').slice(0, 70), slot: SLOTS.some(s => s[0] === r.slot) ? r.slot : 'mittag', portions: Math.max(1, Math.round(num(r.portions) || 1)), kcal: num(r.kcal), protein: num(r.protein), carbs: num(r.carbs), fat: num(r.fat), fiber: r.fiber != null ? num(r.fiber) : undefined, minutes: Math.round(num(r.minutes)) || p.time, mealprep: !!r.mealprep, storage: String(r.storage || '').slice(0, 80), ingredients: (r.ingredients || []).map(String).slice(0, 14), steps: (r.steps || []).map(String).slice(0, 8), visual: r.visual && typeof r.visual === 'object' ? { style: String(r.visual.style || ''), colors: (r.visual.colors || []).map(String) } : {} }));
   const ids = new Set(recipes.map(r => r.id));
   const dayList = (Array.isArray(out.days) ? out.days : []).slice(0, days.length).map((d, i) => ({ key: days[i].key, label: days[i].label, meals: (Array.isArray(d.meals) ? d.meals : []).filter(m => ids.has(String(m.recipe))).map(m => ({ slot: SLOTS.some(s => s[0] === m.slot) ? m.slot : 'mittag', recipe: String(m.recipe), eaten: false })) }));
@@ -3087,11 +3284,11 @@ function recipeSheet(id) {
 function paywall(reason) {
   openSheet(`${reason ? `<div class="banner">${ic('lock', 18)}<div>${esc(reason)}</div></div>` : ''}<span class="tag ember" style="align-self:flex-start">Repwerk Pro</span><h2 class="disp" style="font-size:28px;line-height:32px">Dein Plan passt sich jede Woche an.</h2>
     <ul class="list">${['Keine Werbung','30 KI-Scans pro Tag statt 3','KI-Ernährungsplan mit Rezepten und Einkaufsliste','AI Coach mit 50 Nachrichten pro Tag','Trainingsplan, der mit deiner Leistung wächst','Wochen- und Monatsberichte'].map(x => `<li><span style="color:var(--good)">${ic('check', 20)}</span>${x}</li>`).join('')}</ul>
-    <div class="card row" style="border-color:var(--ember);background:var(--ember-soft)"><div class="grow"><div style="font-weight:700">Jährlich</div><div class="cap">59,99 € pro Jahr · entspricht 5,00 € im Monat</div></div><span class="tag ember">−44 %</span></div>
-    <div class="card"><div style="font-weight:700">Monatlich</div><div class="cap">8,99 € pro Monat</div></div>
-    <button class="btn btn-p btn-block" data-pro>Pro in der Demo freischalten</button>
-    <p class="cap" style="margin:0;text-align:center">Prototyp: Es wird nichts bezahlt. In der App läuft der Kauf über App Store bzw. Google Play mit 7 Tagen gratis, jederzeit kündbar.</p>
-    <button class="btn btn-g btn-block" data-close-sheet style="color:var(--ink-muted)">Mit Free weitermachen</button>`, sh => sh.addEventListener('click', ev => { if (ev.target.closest('[data-pro]')) { S.pro = true; save(); closeSheet(); render(); toast('Pro ist in der Demo aktiv'); } }));
+    ${payOn() ? '' : `<div class="card row" style="border-color:var(--ember);background:var(--ember-soft)"><div class="grow"><div style="font-weight:700">Jährlich</div><div class="cap">59,99 € pro Jahr · entspricht 5,00 € im Monat</div></div><span class="tag ember">−44 %</span></div>
+    <div class="card"><div style="font-weight:700">Monatlich</div><div class="cap">8,99 € pro Monat</div></div>`}
+    ${payOn() ? payButtonsHTML() : `<button class="btn btn-p btn-block" data-pro>Pro in der Demo freischalten</button>
+    <p class="cap" style="margin:0;text-align:center">Prototyp: Es wird nichts bezahlt. In der App läuft der Kauf über App Store bzw. Google Play mit 7 Tagen gratis, jederzeit kündbar.</p>`}
+    <button class="btn btn-g btn-block" data-close-sheet style="color:var(--ink-muted)">Mit Free weitermachen</button>`, sh => sh.addEventListener('click', ev => { if (ev.target.closest('[data-pro]') && !payOn()) { S.pro = true; save(); closeSheet(); render(); toast('Pro ist in der Demo aktiv'); } }));
 }
 
 /* ---------- Coach ---------- */
